@@ -1,5 +1,9 @@
 # IssueBridge
 
+[![tests](https://github.com/MrZoller/issue-bridge/actions/workflows/tests.yml/badge.svg)](https://github.com/MrZoller/issue-bridge/actions/workflows/tests.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python: 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
+
 A comprehensive service for synchronizing GitLab issues between different GitLab instances. This tool is perfect for organizations that maintain mirrors of their repositories across multiple GitLab instances and need to keep issues in sync.
 
 ## Features
@@ -176,7 +180,13 @@ docker-compose exec issuebridge sqlite3 /data/issuebridge.db
 
 ### Environment Variables
 
-Create a `.env` file or set these environment variables:
+Start by copying the example file:
+
+```bash
+cp .env.example .env
+```
+
+Then edit `.env` (or set environment variables via your process manager). The supported keys are:
 
 ```env
 # Database Configuration
@@ -192,6 +202,13 @@ DEFAULT_SYNC_INTERVAL_MINUTES=10
 # Logging
 LOG_LEVEL=INFO
 ```
+
+Notes:
+
+- `DATABASE_URL`: SQLite by default. For Docker, it’s typically set to a path under `/data/` via `docker-compose.yml`.
+- `HOST`/`PORT`: where the web UI/API binds.
+- `DEFAULT_SYNC_INTERVAL_MINUTES`: default interval for newly-created project pairs.
+- `LOG_LEVEL`: e.g. `DEBUG`, `INFO`, `WARNING`, `ERROR`.
 
 ### GitLab Access Tokens
 
@@ -524,6 +541,7 @@ python3 -m unittest discover -s tests -p 'test_*.py'
 - **Network**: Consider running in a private network
 - **Database**: Protect the database file (contains access tokens)
 - **Permissions**: Use least-privilege access tokens
+- **No built-in auth**: The web UI and API endpoints are not authenticated by default. If you expose this beyond localhost/private networks, run it behind an auth layer (reverse proxy with SSO/basic auth) and restrict inbound network access.
 
 ## Limitations
 
