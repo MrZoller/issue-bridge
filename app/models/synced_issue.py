@@ -1,8 +1,13 @@
 """Synced issue model"""
 from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, Text
 from sqlalchemy.orm import relationship
-from datetime import datetime
+from datetime import datetime, timezone
 from app.models.base import Base
+
+
+def utcnow() -> datetime:
+    """UTC 'now' as tz-naive datetime (consistent with GitLab parsing)."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class SyncedIssue(Base):
@@ -26,7 +31,7 @@ class SyncedIssue(Base):
     target_updated_at = Column(DateTime, nullable=True)
 
     # Sync metadata
-    last_synced_at = Column(DateTime, default=datetime.utcnow)
+    last_synced_at = Column(DateTime, default=utcnow)
     sync_hash = Column(String, nullable=True)  # Hash of last synced content
 
     # Relationships

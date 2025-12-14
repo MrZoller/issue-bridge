@@ -3,7 +3,7 @@ import logging
 import hashlib
 import json
 from typing import Dict, Any, Optional, List, Tuple
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 from app.models import (
@@ -26,6 +26,26 @@ class SyncService:
     def __init__(self, db: Session):
         self.db = db
         self.clients: Dict[int, GitLabClient] = {}
+
+    @staticmethod
+    def _utcnow() -> datetime:
+        """UTC 'now' as tz-naive datetime for DB + comparisons."""
+        return datetime.now(timezone.utc).replace(tzinfo=None)
+
+    @staticmethod
+    def _normalize_utc_naive(dt: Optional[datetime]) -> Optional[datetime]:
+        """Normalize a datetime to UTC tz-naive (safe for comparisons)."""
+        if dt is None:
+            return None
+        if dt.tzinfo is None:
+            return dt
+        return dt.astimezone(timezone.utc).replace(tzinfo=None)
+
+    @classmethod
+    def _parse_gitlab_datetime(cls, value: str) -> datetime:
+        """Parse GitLab ISO8601 timestamps into UTC tz-naive datetimes."""
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return cls._normalize_utc_naive(dt)
 
     def _get_client(self, instance_id: int) -> GitLabClient:
         """Get or create GitLab client for instance"""
@@ -276,13 +296,16 @@ class SyncService:
         self, synced_issue: SyncedIssue, source_issue: Any, target_issue: Any
     ) -> bool:
         """Detect if both issues were updated since last sync"""
-        source_updated = datetime.fromisoformat(source_issue.updated_at.replace('Z', '+00:00'))
-        target_updated = datetime.fromisoformat(target_issue.updated_at.replace('Z', '+00:00'))
+        source_updated = self._parse_gitlab_datetime(source_issue.updated_at)
+        target_updated = self._parse_gitlab_datetime(target_issue.updated_at)
+        last_synced_at = self._normalize_utc_naive(synced_issue.last_synced_at)
 
         # If both were updated after last sync, we have a conflict
-        if synced_issue.last_synced_at:
-            return (source_updated > synced_issue.last_synced_at and
-                    target_updated > synced_issue.last_synced_at)
+        if last_synced_at:
+            return (
+                source_updated > last_synced_at
+                and target_updated > last_synced_at
+            )
         return False
 
     def _log_conflict(
@@ -397,7 +420,7 @@ class SyncService:
                     stats[key] += stats_t2s[key]
 
             # Update last sync time
-            project_pair.last_sync_at = datetime.utcnow()
+            project_pair.last_sync_at = self._utcnow()
             self.db.commit()
 
             logger.info(f"Sync completed for {project_pair.name}: {stats}")
@@ -473,16 +496,15 @@ class SyncService:
                             continue
 
                         # Check if source was updated since last sync
-                        source_updated = datetime.fromisoformat(
-                            source_issue.updated_at.replace('Z', '+00:00')
-                        )
-                        if source_updated > synced_issue.last_synced_at:
+                        source_updated = self._parse_gitlab_datetime(source_issue.updated_at)
+                        last_synced_at = self._normalize_utc_naive(synced_issue.last_synced_at)
+                        if last_synced_at is None or source_updated > last_synced_at:
                             # Update target issue
                             self._update_issue_from_source(
                                 source_issue, target_issue_iid, source_instance,
                                 target_client, target_project_id, target_instance.id
                             )
-                            synced_issue.last_synced_at = datetime.utcnow()
+                            synced_issue.last_synced_at = self._utcnow()
                             synced_issue.sync_hash = self._compute_issue_hash(source_issue)
                             self.db.commit()
                             stats["updated"] += 1
