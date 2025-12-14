@@ -105,13 +105,21 @@ class GitLabClient:
             raise
 
     def get_issue_or_none(self, project_id: str, issue_iid: int) -> Optional[Any]:
-        """Get a specific issue by IID, returning None on 404."""
+        """Get a specific issue by IID, returning None on 404/403."""
+        issue, rc = self.get_issue_optional(project_id, issue_iid)
+        if issue is not None:
+            return issue
+        if rc in (403, 404):
+            return None
+        # For unexpected cases, raise to surface the error.
+        raise gitlab.exceptions.GitlabGetError("Failed to get issue", response_code=rc)
+
+    def get_issue_optional(self, project_id: str, issue_iid: int) -> tuple[Optional[Any], Optional[int]]:
+        """Get issue by IID, returning (issue, response_code_if_error)."""
         try:
-            return self.get_issue(project_id, issue_iid)
+            return self.get_issue(project_id, issue_iid), None
         except gitlab.exceptions.GitlabGetError as e:
-            if getattr(e, "response_code", None) == 404:
-                return None
-            raise
+            return None, getattr(e, "response_code", None)
 
     def create_issue(self, project_id: str, issue_data: Dict[str, Any]) -> Any:
         """Create a new issue"""

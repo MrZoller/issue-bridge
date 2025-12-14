@@ -7,6 +7,7 @@ from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime, timezone, timedelta
 from types import SimpleNamespace
 from sqlalchemy.orm import Session
+import gitlab
 
 from app.models import (
     ProjectPair,
@@ -405,14 +406,29 @@ class SyncService:
             source_pid = source_project_id or (str(source_issue.project_id) if hasattr(source_issue, "project_id") else None)
             if not source_pid:
                 raise ValueError("Missing source project id for comment sync")
-            source_notes = source_client.get_issue_notes(
-                source_pid, source_issue.iid
-            )
+            try:
+                source_notes = source_client.get_issue_notes(source_pid, source_issue.iid)
+            except gitlab.exceptions.GitlabGetError as e:
+                # Permission/confidential notes shouldn't break issue sync.
+                if getattr(e, "response_code", None) in (401, 403):
+                    logger.warning(
+                        f"Skipping comment sync for source issue #{source_issue.iid} (notes inaccessible)"
+                    )
+                    return
+                raise
 
             source_base = self._normalize_instance_url(source_instance.url)
 
             # Get existing target notes to avoid duplicates / loops
-            target_notes = target_client.get_issue_notes(target_project_id, target_issue.iid)
+            try:
+                target_notes = target_client.get_issue_notes(target_project_id, target_issue.iid)
+            except gitlab.exceptions.GitlabGetError as e:
+                if getattr(e, "response_code", None) in (401, 403):
+                    logger.warning(
+                        f"Skipping comment sync for target issue #{target_issue.iid} (notes inaccessible)"
+                    )
+                    return
+                raise
             existing_note_markers: set[tuple[str, str, int, int]] = set()
             existing_note_bodies = set()
             for n in target_notes:
@@ -466,6 +482,123 @@ class SyncService:
 
         except Exception as e:
             logger.error(f"Failed to sync comments: {e}")
+
+    def _find_synced_issue_by_pair(self, project_pair_id: int, source_iid: int, target_iid: int) -> Optional[SyncedIssue]:
+        return (
+            self.db.query(SyncedIssue)
+            .filter(
+                SyncedIssue.project_pair_id == project_pair_id,
+                SyncedIssue.source_issue_iid == source_iid,
+                SyncedIssue.target_issue_iid == target_iid,
+            )
+            .first()
+        )
+
+    def _find_synced_issue_by_either_side(self, project_pair_id: int, source_iid: int, target_iid: int) -> Optional[SyncedIssue]:
+        # Best-effort de-duplication. (We avoid SQLAlchemy `or_` to keep this simple for now.)
+        existing = (
+            self.db.query(SyncedIssue)
+            .filter(
+                SyncedIssue.project_pair_id == project_pair_id,
+                SyncedIssue.source_issue_iid == source_iid,
+            )
+            .first()
+        )
+        if existing:
+            return existing
+        return (
+            self.db.query(SyncedIssue)
+            .filter(
+                SyncedIssue.project_pair_id == project_pair_id,
+                SyncedIssue.target_issue_iid == target_iid,
+            )
+            .first()
+        )
+
+    def repair_mappings(self, project_pair_id: int) -> Dict[str, Any]:
+        """
+        Rebuild SyncedIssue mappings by scanning issue description markers on both sides.
+
+        Safe by default:
+        - Only creates missing mappings.
+        - If a conflicting mapping already exists for either side, it is left untouched.
+        """
+        project_pair = self.db.query(ProjectPair).filter(ProjectPair.id == project_pair_id).first()
+        if not project_pair:
+            raise ValueError(f"Project pair {project_pair_id} not found")
+
+        source_client = self._get_client(project_pair.source_instance_id)
+        target_client = self._get_client(project_pair.target_instance_id)
+
+        source_url = self._normalize_instance_url(project_pair.source_instance.url)
+        target_url = self._normalize_instance_url(project_pair.target_instance.url)
+
+        # Full scans; this is a repair job.
+        source_issues = source_client.get_issues(project_pair.source_project_id, updated_after=None)
+        target_issues = target_client.get_issues(project_pair.target_project_id, updated_after=None)
+
+        source_by_iid = {i.iid: i for i in source_issues}
+        target_by_iid = {i.iid: i for i in target_issues}
+
+        pairs: set[tuple[int, int]] = set()
+
+        # If a SOURCE issue was synced from TARGET, its marker points to TARGET.
+        for issue in source_issues:
+            marked = self._parse_issue_marker(getattr(issue, "description", None))
+            if not marked:
+                continue
+            m_url, m_pid, m_iid = marked
+            if m_url == target_url and m_pid == str(project_pair.target_project_id):
+                pairs.add((int(issue.iid), int(m_iid)))
+
+        # If a TARGET issue was synced from SOURCE, its marker points to SOURCE.
+        for issue in target_issues:
+            marked = self._parse_issue_marker(getattr(issue, "description", None))
+            if not marked:
+                continue
+            m_url, m_pid, m_iid = marked
+            if m_url == source_url and m_pid == str(project_pair.source_project_id):
+                pairs.add((int(m_iid), int(issue.iid)))
+
+        stats = {"created": 0, "skipped_existing": 0, "conflicts": 0}
+
+        for source_iid, target_iid in sorted(pairs):
+            # Exact match exists
+            if self._find_synced_issue_by_pair(project_pair.id, source_iid, target_iid):
+                stats["skipped_existing"] += 1
+                continue
+
+            # Any mapping exists for either side => conflict
+            if self._find_synced_issue_by_either_side(project_pair.id, source_iid, target_iid):
+                stats["conflicts"] += 1
+                continue
+
+            source_issue = source_by_iid.get(source_iid)
+            target_issue = target_by_iid.get(target_iid)
+            if not source_issue or not target_issue:
+                stats["conflicts"] += 1
+                continue
+
+            synced_hash = self._compute_synced_hash(
+                source_issue,
+                source_instance_url=project_pair.source_instance.url,
+                source_project_id=project_pair.source_project_id,
+            )
+
+            row = SyncedIssue(
+                project_pair_id=project_pair.id,
+                source_issue_iid=int(source_issue.iid),
+                source_issue_id=int(source_issue.id),
+                target_issue_iid=int(target_issue.iid),
+                target_issue_id=int(target_issue.id),
+                sync_hash=synced_hash,
+                last_synced_at=self._utcnow(),
+            )
+            self.db.add(row)
+            self.db.commit()
+            stats["created"] += 1
+
+        return {"status": "success", "stats": stats, "pairs_found": len(pairs)}
 
     def _update_issue_from_source(
         self,
