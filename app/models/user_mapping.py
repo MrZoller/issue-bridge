@@ -10,8 +10,21 @@ class UserMapping(Base):
 
     __tablename__ = "user_mappings"
     __table_args__ = (
-        UniqueConstraint("source_instance_id", "source_username", name="uq_source_user"),
-        UniqueConstraint("target_instance_id", "target_username", name="uq_target_user"),
+        # Uniqueness must be scoped to the source<->target instance pair.
+        # Otherwise, multi-instance setups can hit integrity errors when the same username
+        # exists across different instances.
+        UniqueConstraint(
+            "source_instance_id",
+            "source_username",
+            "target_instance_id",
+            name="uq_source_user_per_target_instance",
+        ),
+        UniqueConstraint(
+            "target_instance_id",
+            "target_username",
+            "source_instance_id",
+            name="uq_target_user_per_source_instance",
+        ),
     )
 
     id = Column(Integer, primary_key=True, index=True)
