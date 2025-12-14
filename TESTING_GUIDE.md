@@ -85,17 +85,46 @@ Issue #3: Closed Test Issue
 
 ### Step 2: Generate Access Tokens
 
-For each GitLab instance, create a Personal Access Token:
+For each GitLab instance, create a Personal Access Token with the required permissions.
 
-1. Go to **Settings → Access Tokens**
-2. Create token with these scopes:
-   - ✅ `api` (full API access)
-   - ✅ `read_api` (read access)
-   - ✅ `write_repository` (write access for creating issues)
-3. Set expiration: 7 days (short-lived for security)
-4. **Save tokens securely** - you'll need them for configuration
+#### Creating Test Tokens
 
-**⚠️ SECURITY NOTE:** Never commit access tokens to version control!
+**For GitLab.com or Self-Hosted GitLab:**
+
+1. **Log into your GitLab instance**
+   - GitLab.com: https://gitlab.com
+   - Self-hosted: Your GitLab instance URL
+
+2. **Navigate to Access Tokens settings**
+   - Click your **avatar/profile picture** in the top-right corner
+   - Select **"Settings"** from the dropdown
+   - In the left sidebar, click **"Access Tokens"**
+
+3. **Create a new test token**
+   - **Token name**: `Test - Issue Sync Service` (include "Test" to identify it later)
+   - **Expiration date**: 7-14 days (short-lived for testing security)
+   - **Select scopes** - Check **all three** boxes:
+     - ☑️ `api` (Full API access - required for creating/updating issues, labels, milestones)
+     - ☑️ `read_api` (Read access - required for fetching issues and project data)
+     - ☑️ `write_repository` (Write access - required for creating issues and comments)
+
+4. **Generate the token**
+   - Click **"Create personal access token"**
+   - ⚠️ **IMPORTANT**: Copy the token immediately and store it securely
+   - You will **not** be able to see this token again after leaving the page
+
+5. **Store tokens securely during testing**
+   - Use a password manager or secure notes app
+   - Create a temporary test file (e.g., `test_tokens.txt`) but **NEVER commit it**
+   - Add `test_tokens.txt` to `.gitignore` if you create one
+
+**⚠️ SECURITY NOTES:**
+- Never commit access tokens to version control
+- Never share tokens in chat, email, or public forums
+- Use short expiration periods for test tokens (7-14 days)
+- Revoke test tokens immediately after testing is complete
+- For testing, it's fine to use your personal account tokens
+- For production, use a dedicated service account instead
 
 ### Step 3: Configure Test Environment
 

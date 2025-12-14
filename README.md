@@ -39,7 +39,9 @@ A comprehensive service for synchronizing GitLab issues between different GitLab
 ### Prerequisites
 
 - Docker and Docker Compose installed
-- GitLab personal access tokens with API access for each instance
+- **GitLab Personal Access Tokens** for each instance you want to sync
+  - Must have scopes: `api`, `read_api`, `write_repository`
+  - See [GitLab Access Tokens](#gitlab-access-tokens) section below for detailed instructions
 
 ### Installation
 
@@ -88,6 +90,9 @@ docker-compose exec gitlab-sync sqlite3 /data/gitlab_sync.db
 
 - Python 3.11 or higher
 - pip
+- **GitLab Personal Access Tokens** for each instance you want to sync
+  - Must have scopes: `api`, `read_api`, `write_repository`
+  - See [GitLab Access Tokens](#gitlab-access-tokens) section below for detailed instructions
 
 ### Steps
 
@@ -145,16 +150,70 @@ LOG_LEVEL=INFO
 
 ### GitLab Access Tokens
 
-For each GitLab instance, you need a personal access token with the following scopes:
-- `api` - Full API access
-- `read_api` - Read API access
-- `write_repository` - Write access (for creating issues)
+For each GitLab instance you want to sync, you need a **Personal Access Token** with appropriate permissions.
 
-To create a personal access token:
-1. Go to your GitLab instance
-2. Navigate to User Settings > Access Tokens
-3. Create a new token with the required scopes
-4. Copy the token (you won't see it again!)
+#### Required Token Scopes
+
+Your token must have these scopes:
+- ✅ **`api`** - Full API access (required for creating/updating issues, labels, milestones)
+- ✅ **`read_api`** - Read API access (required for fetching issues and project data)
+- ✅ **`write_repository`** - Write access (required for creating issues and comments)
+
+#### How to Create a Personal Access Token
+
+**For GitLab.com or Self-Hosted GitLab:**
+
+1. **Log into your GitLab instance**
+   - For GitLab.com: https://gitlab.com
+   - For self-hosted: Your GitLab instance URL
+
+2. **Navigate to Access Tokens settings**
+   - Click your **avatar/profile picture** in the top-right corner
+   - Select **"Settings"** from the dropdown menu
+   - In the left sidebar, click **"Access Tokens"**
+
+3. **Create a new token**
+   - **Token name**: Enter a descriptive name (e.g., `GitLab Issue Sync Service`)
+   - **Expiration date**: Set an expiration date
+     - For production: Consider 90 days or 1 year, set calendar reminders to rotate
+     - For testing: 7-30 days is recommended
+   - **Select scopes**: Check these three boxes:
+     - ☑️ `api`
+     - ☑️ `read_api`
+     - ☑️ `write_repository`
+
+4. **Generate the token**
+   - Click **"Create personal access token"**
+   - ⚠️ **IMPORTANT**: Copy the token immediately and store it securely
+   - You will **not** be able to see this token again after leaving the page
+
+5. **Store the token securely**
+   - Save in a password manager (recommended)
+   - Never commit tokens to version control
+   - Never share tokens in chat, email, or public forums
+
+#### Token Permissions Explained
+
+- **`api`**: Grants full read/write access to the GitLab API. Required for creating and updating issues, managing labels, milestones, and comments.
+- **`read_api`**: Allows reading data from the API. Required for fetching existing issues, project details, and user information.
+- **`write_repository`**: Enables write access to repositories. Required for creating issues and adding comments.
+
+#### Where Tokens Are Used
+
+After creating your tokens, you'll enter them in the GitLab Issue Transfer Buddy web interface:
+1. Navigate to the **"GitLab Instances"** tab
+2. Click **"Add Instance"**
+3. Enter the instance URL and paste the **Access Token** you created
+4. The application encrypts and stores the token in the database
+
+#### Token Security Best Practices
+
+- 🔒 **Use HTTPS**: Always use HTTPS URLs for GitLab instances
+- 🔄 **Rotate regularly**: Set expiration dates and rotate tokens periodically
+- 🎯 **Least privilege**: Only grant the minimum required scopes
+- 🗄️ **Secure storage**: Protect the application database (it contains tokens)
+- 🚫 **Never commit**: Add tokens to `.gitignore` and never commit to version control
+- 👥 **Use service accounts**: For production, consider using a dedicated service account instead of personal tokens
 
 ## Usage Guide
 
@@ -185,6 +244,8 @@ Navigate to the "Project Pairs" tab and create sync configurations:
 - **Name**: A descriptive name for this pair
 - **Source Instance**: The source GitLab instance
 - **Source Project ID/Path**: Project ID (e.g., `123`) or path (e.g., `group/project`)
+  - **Finding Project ID**: In GitLab, go to your project → Settings → General → The Project ID is displayed at the top
+  - **Using Project Path**: Alternatively, use the path format: `username/project-name` or `group/subgroup/project-name`
 - **Target Instance**: The target GitLab instance
 - **Target Project ID/Path**: Project ID or path on target
 - **Bidirectional Sync**: Enable for two-way sync
