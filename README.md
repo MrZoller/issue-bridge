@@ -201,6 +201,11 @@ DEFAULT_SYNC_INTERVAL_MINUTES=10
 
 # Logging
 LOG_LEVEL=INFO
+
+# Auth (optional)
+AUTH_ENABLED=false
+AUTH_USERNAME=admin
+AUTH_PASSWORD=change-me
 ```
 
 Notes:
@@ -209,6 +214,8 @@ Notes:
 - `HOST`/`PORT`: where the web UI/API binds.
 - `DEFAULT_SYNC_INTERVAL_MINUTES`: default interval for newly-created project pairs.
 - `LOG_LEVEL`: e.g. `DEBUG`, `INFO`, `WARNING`, `ERROR`.
+- `AUTH_ENABLED`: set `true` to protect the UI/API with built-in HTTP Basic auth (recommended if you expose this beyond localhost/private networks).
+- `AUTH_USERNAME` / `AUTH_PASSWORD`: credentials used when `AUTH_ENABLED=true`.
 
 ### GitLab Access Tokens
 
@@ -542,6 +549,7 @@ python3 -m unittest discover -s tests -p 'test_*.py'
 - **Database**: Protect the database file (contains access tokens)
 - **Permissions**: Use least-privilege access tokens
 - **No built-in auth**: The web UI and API endpoints are not authenticated by default. If you expose this beyond localhost/private networks, run it behind an auth layer (reverse proxy with SSO/basic auth) and restrict inbound network access.
+- **Built-in auth option**: You can enable HTTP Basic auth by setting `AUTH_ENABLED=true` plus `AUTH_USERNAME`/`AUTH_PASSWORD`.
 
 ## Limitations
 

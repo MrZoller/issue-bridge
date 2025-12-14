@@ -19,6 +19,13 @@ class Settings(BaseSettings):
     # Logging
     log_level: str = "INFO"
 
+    # Auth (optional)
+    # When enabled, all routes (UI, API, docs, static) are protected by HTTP Basic auth,
+    # except for /health.
+    auth_enabled: bool = False
+    auth_username: str | None = None
+    auth_password: str | None = None
+
     class Config:
         env_file = ".env"
         case_sensitive = False
