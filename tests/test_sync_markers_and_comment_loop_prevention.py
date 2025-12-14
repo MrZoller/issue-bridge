@@ -1,6 +1,6 @@
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch, Mock
+from unittest.mock import Mock, patch
 
 
 class SyncMarkersAndCommentLoopPreventionTests(unittest.TestCase):
@@ -58,14 +58,11 @@ class SyncMarkersAndCommentLoopPreventionTests(unittest.TestCase):
         source_client = SimpleNamespace(get_issue_notes=lambda project_id, iid: [normal, loop])
 
         # Target already has note marker for the normal note, so it should not be re-created.
-        existing_body = (
-            "**Comment by @alice:**\n\nhello\n\n---\n" +
-            SyncService._note_marker(
-                source_instance_url="https://src",
-                source_project_id="sproj",
-                source_issue_iid=7,
-                source_note_id=101,
-            )
+        existing_body = "**Comment by @alice:**\n\nhello\n\n---\n" + SyncService._note_marker(
+            source_instance_url="https://src",
+            source_project_id="sproj",
+            source_issue_iid=7,
+            source_note_id=101,
         )
         target_client = SimpleNamespace(
             get_issue_notes=lambda project_id, iid: [SimpleNamespace(body=existing_body)],

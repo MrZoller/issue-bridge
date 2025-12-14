@@ -1,11 +1,12 @@
 """Background scheduler for periodic sync"""
+
 import logging
+
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
-from sqlalchemy.orm import Session
 
-from app.models.base import SessionLocal
 from app.models import ProjectPair
+from app.models.base import SessionLocal
 from app.services.sync_service import SyncService
 
 logger = logging.getLogger(__name__)
@@ -37,9 +38,7 @@ class SyncScheduler:
         """Schedule sync jobs for all enabled project pairs"""
         db = SessionLocal()
         try:
-            enabled_pairs = (
-                db.query(ProjectPair).filter(ProjectPair.sync_enabled == True).all()
-            )
+            enabled_pairs = db.query(ProjectPair).filter(ProjectPair.sync_enabled == True).all()
             enabled_ids = {p.id for p in enabled_pairs}
 
             # If this is ever re-run, reconcile existing jobs too.

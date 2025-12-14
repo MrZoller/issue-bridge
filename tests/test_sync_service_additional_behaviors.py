@@ -1,8 +1,8 @@
+import logging
 import unittest
 from datetime import datetime
 from types import SimpleNamespace
-from unittest.mock import patch, Mock
-import logging
+from unittest.mock import patch
 
 logging.disable(logging.CRITICAL)
 
@@ -77,8 +77,8 @@ class SyncServiceAdditionalBehaviorTests(unittest.TestCase):
         self.assertEqual(svc._compute_issue_hash(i1), svc._compute_issue_hash(i2))
 
     def test_comment_only_updates_sync_comments_without_issue_update(self):
-        from app.services.sync_service import SyncService
         from app.models.sync_log import SyncDirection
+        from app.services.sync_service import SyncService
 
         # existing mapping
         synced_issue = SimpleNamespace(
@@ -114,11 +114,15 @@ class SyncServiceAdditionalBehaviorTests(unittest.TestCase):
 
         class _TargetClient:
             def get_issue_optional(self, project_id, issue_iid):
-                return SimpleNamespace(iid=9, id=900, state="opened", updated_at="2025-01-01T00:00:00Z"), None
+                return SimpleNamespace(
+                    iid=9, id=900, state="opened", updated_at="2025-01-01T00:00:00Z"
+                ), None
 
-        with patch.object(svc, "_compute_issue_hash", return_value="hash", autospec=True), \
-             patch.object(svc, "_update_issue_from_source", autospec=True) as upd, \
-             patch.object(svc, "_sync_comments", autospec=True) as sync_comments:
+        with (
+            patch.object(svc, "_compute_issue_hash", return_value="hash", autospec=True),
+            patch.object(svc, "_update_issue_from_source", autospec=True) as upd,
+            patch.object(svc, "_sync_comments", autospec=True) as sync_comments,
+        ):
             stats = svc._sync_direction(
                 project_pair=SimpleNamespace(id=1),
                 source_client=_SourceClient(),
@@ -138,8 +142,8 @@ class SyncServiceAdditionalBehaviorTests(unittest.TestCase):
         self.assertEqual(stats["updated"], 1)
 
     def test_rebuilds_mapping_from_sync_reference_in_description(self):
-        from app.services.sync_service import SyncService
         from app.models.sync_log import SyncDirection
+        from app.services.sync_service import SyncService
 
         db = _FakeSession(first_queue=[None])
         svc = SyncService(db)
@@ -168,8 +172,10 @@ class SyncServiceAdditionalBehaviorTests(unittest.TestCase):
                     return SimpleNamespace(iid=99, id=9900), None
                 return None, 404
 
-        with patch.object(svc, "_compute_issue_hash", return_value="hash", autospec=True), \
-             patch.object(svc, "_create_issue_from_source", autospec=True) as create_call:
+        with (
+            patch.object(svc, "_compute_issue_hash", return_value="hash", autospec=True),
+            patch.object(svc, "_create_issue_from_source", autospec=True) as create_call,
+        ):
             stats = svc._sync_direction(
                 project_pair=SimpleNamespace(id=1),
                 source_client=_SourceClient(),
@@ -209,7 +215,10 @@ class SyncServiceAdditionalBehaviorTests(unittest.TestCase):
                 return "baseline"
             return "changed"
 
-        with patch("app.services.sync_service.SyncService._compute_issue_hash", side_effect=_hash_side_effect):
+        with patch(
+            "app.services.sync_service.SyncService._compute_issue_hash",
+            side_effect=_hash_side_effect,
+        ):
             self.assertEqual(svc._compute_issue_hash(source_issue), "baseline")
             self.assertEqual(svc._compute_issue_hash(target_issue), "changed")
             self.assertFalse(svc._detect_conflict(synced_issue, source_issue, target_issue))

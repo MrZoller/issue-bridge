@@ -1,15 +1,17 @@
 """Main FastAPI application"""
+
 import logging
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.requests import Request
 
+from app.api import dashboard, instances, project_pairs, sync, user_mappings
 from app.config import settings
 from app.models.base import init_db
-from app.api import instances, project_pairs, user_mappings, sync, dashboard
 from app.scheduler import scheduler
 
 # Configure logging

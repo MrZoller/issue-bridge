@@ -26,7 +26,6 @@ import sys
 import time
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -206,8 +205,8 @@ def _run() -> None:
         rc = server.poll()
         if rc not in (0, None):
             try:
-                out = (server.stdout.read() if server.stdout else "")
-                err = (server.stderr.read() if server.stderr else "")
+                out = server.stdout.read() if server.stdout else ""
+                err = server.stderr.read() if server.stderr else ""
             except Exception:  # noqa: BLE001
                 out, err = "", ""
             if out.strip() or err.strip():

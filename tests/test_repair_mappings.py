@@ -1,7 +1,7 @@
+import logging
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
-import logging
 
 logging.disable(logging.CRITICAL)
 
@@ -43,8 +43,8 @@ class _FakeSession:
 
 class RepairMappingsTests(unittest.TestCase):
     def test_repair_mappings_creates_missing_rows_from_markers(self):
-        from app.services.sync_service import SyncService
         from app.models import ProjectPair, SyncedIssue
+        from app.services.sync_service import SyncService
 
         db = _FakeSession()
 
@@ -77,8 +77,12 @@ class RepairMappingsTests(unittest.TestCase):
             iteration_due_date="2025-01-14",
             epic_title="Epic A",
         )
-        source_issue = SimpleNamespace(iid=7, id=700, title="A", description="B", labels=[], state="opened")
-        target_issue = SimpleNamespace(iid=9, id=900, title="A", description="X\n" + marker, labels=[], state="opened")
+        source_issue = SimpleNamespace(
+            iid=7, id=700, title="A", description="B", labels=[], state="opened"
+        )
+        target_issue = SimpleNamespace(
+            iid=9, id=900, title="A", description="X\n" + marker, labels=[], state="opened"
+        )
 
         class _Client:
             def __init__(self, issues):
@@ -114,8 +118,12 @@ class RepairMappingsTests(unittest.TestCase):
         source_client = _Client([source_issue])
         target_client = _Client([target_issue])
 
-        with patch.object(svc, "_get_client", side_effect=[source_client, target_client], autospec=True), \
-             patch.object(svc, "_compute_synced_hash", return_value="hash", autospec=True):
+        with (
+            patch.object(
+                svc, "_get_client", side_effect=[source_client, target_client], autospec=True
+            ),
+            patch.object(svc, "_compute_synced_hash", return_value="hash", autospec=True),
+        ):
             out = svc.repair_mappings(1)
 
         self.assertEqual(out["status"], "success")

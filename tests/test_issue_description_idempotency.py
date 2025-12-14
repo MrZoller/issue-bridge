@@ -7,10 +7,14 @@ class IssueDescriptionIdempotencyTests(unittest.TestCase):
 
         svc = SyncService(db=object())
 
-        desc = "hello" + "\n" + SyncService._issue_marker(
-            source_instance_url="https://src",
-            source_project_id="p",
-            source_issue_iid=1,
+        desc = (
+            "hello"
+            + "\n"
+            + SyncService._issue_marker(
+                source_instance_url="https://src",
+                source_project_id="p",
+                source_issue_iid=1,
+            )
         )
 
         out = svc._add_sync_reference(desc, "https://other", 999, source_project_id="other")

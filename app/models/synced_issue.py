@@ -1,7 +1,10 @@
 """Synced issue model"""
-from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, UniqueConstraint
-from sqlalchemy.orm import relationship
+
 from datetime import datetime, timezone
+
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy.orm import relationship
+
 from app.models.base import Base
 
 
@@ -15,8 +18,12 @@ class SyncedIssue(Base):
 
     __tablename__ = "synced_issues"
     __table_args__ = (
-        UniqueConstraint("project_pair_id", "source_issue_iid", name="uq_synced_issues_pair_source_iid"),
-        UniqueConstraint("project_pair_id", "target_issue_iid", name="uq_synced_issues_pair_target_iid"),
+        UniqueConstraint(
+            "project_pair_id", "source_issue_iid", name="uq_synced_issues_pair_source_iid"
+        ),
+        UniqueConstraint(
+            "project_pair_id", "target_issue_iid", name="uq_synced_issues_pair_target_iid"
+        ),
     )
 
     id = Column(Integer, primary_key=True, index=True)
@@ -26,12 +33,12 @@ class SyncedIssue(Base):
 
     # Source issue
     source_issue_iid = Column(Integer, nullable=False)  # Issue IID on source
-    source_issue_id = Column(Integer, nullable=False)   # Issue ID on source
+    source_issue_id = Column(Integer, nullable=False)  # Issue ID on source
     source_updated_at = Column(DateTime, nullable=True)
 
     # Target issue
     target_issue_iid = Column(Integer, nullable=False)  # Issue IID on target
-    target_issue_id = Column(Integer, nullable=False)   # Issue ID on target
+    target_issue_id = Column(Integer, nullable=False)  # Issue ID on target
     target_updated_at = Column(DateTime, nullable=True)
 
     # Sync metadata
@@ -42,4 +49,6 @@ class SyncedIssue(Base):
     project_pair = relationship("ProjectPair")
 
     def __repr__(self):
-        return f"<SyncedIssue(source_iid={self.source_issue_iid}, target_iid={self.target_issue_iid})>"
+        return (
+            f"<SyncedIssue(source_iid={self.source_issue_iid}, target_iid={self.target_issue_iid})>"
+        )

@@ -16,7 +16,6 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -44,9 +43,16 @@ def seed_demo_db(db_path: Path, overwrite: bool = False) -> SeedResult:
     os.environ["DATABASE_URL"] = _sqlite_url_for_path(db_path)
     os.environ.setdefault("LOG_LEVEL", "WARNING")
 
-    from app.models.base import init_db, SessionLocal  # noqa: WPS433
-    from app.models import GitLabInstance, ProjectPair, UserMapping, SyncLog, Conflict, SyncedIssue  # noqa: WPS433
-    from app.models.sync_log import SyncStatus, SyncDirection  # noqa: WPS433
+    from app.models import (  # noqa: WPS433
+        Conflict,
+        GitLabInstance,
+        ProjectPair,
+        SyncedIssue,
+        SyncLog,
+        UserMapping,
+    )
+    from app.models.base import SessionLocal, init_db  # noqa: WPS433
+    from app.models.sync_log import SyncDirection, SyncStatus  # noqa: WPS433
 
     init_db()
 

@@ -545,7 +545,7 @@ Possible future improvements:
 
 ## License
 
-[Add your license here]
+MIT License. See [`LICENSE`](LICENSE).
 
 ## Support
 

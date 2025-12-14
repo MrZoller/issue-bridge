@@ -1,7 +1,7 @@
+import logging
 import unittest
 from datetime import datetime, timezone
 from unittest.mock import Mock, patch
-import logging
 
 import gitlab
 
@@ -158,7 +158,9 @@ class GitLabClientApiCallTests(unittest.TestCase):
 
         self.assertEqual(out, ["n"])
         project.issues.get.assert_called_once_with(5)
-        notes.list.assert_called_once_with(get_all=True, per_page=100, order_by="created_at", sort="asc")
+        notes.list.assert_called_once_with(
+            get_all=True, per_page=100, order_by="created_at", sort="asc"
+        )
 
     def test_create_issue_note_calls_notes_create(self):
         from app.services.gitlab_client import GitLabClient
@@ -307,7 +309,9 @@ class GitLabClientApiCallTests(unittest.TestCase):
         client.gl.http_list.reset_mock()
         out2 = client.list_group_epics(6, search="Epic")
         self.assertEqual(out2, [{"id": 1}])
-        client.gl.http_list.assert_called_with("/groups/6/epics", query_data={"per_page": 100, "search": "Epic"})
+        client.gl.http_list.assert_called_with(
+            "/groups/6/epics", query_data={"per_page": 100, "search": "Epic"}
+        )
 
         client.gl.http_post.reset_mock()
         out3 = client.add_issue_to_epic(6, 12, issue_id=99)

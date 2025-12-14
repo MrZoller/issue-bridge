@@ -1,10 +1,12 @@
 """GitLab API client wrapper"""
-import gitlab
+
 import logging
-from typing import List, Dict, Any, Optional
-from datetime import datetime, timezone
 import time
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
 from urllib.parse import quote
+
+import gitlab
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +124,9 @@ class GitLabClient:
         # For unexpected cases, raise to surface the error.
         raise gitlab.exceptions.GitlabGetError("Failed to get issue", response_code=rc)
 
-    def get_issue_optional(self, project_id: str, issue_iid: int) -> tuple[Optional[Any], Optional[int]]:
+    def get_issue_optional(
+        self, project_id: str, issue_iid: int
+    ) -> tuple[Optional[Any], Optional[int]]:
         """Get issue by IID, returning (issue, response_code_if_error)."""
         try:
             return self.get_issue(project_id, issue_iid), None
@@ -162,7 +166,9 @@ class GitLabClient:
             project = self.get_project(project_id)
             issue = self._with_retries(lambda: project.issues.get(issue_iid))
             return self._with_retries(
-                lambda: issue.notes.list(get_all=True, per_page=100, order_by="created_at", sort="asc")
+                lambda: issue.notes.list(
+                    get_all=True, per_page=100, order_by="created_at", sort="asc"
+                )
             )
         except Exception as e:
             logger.error(f"Failed to get notes for issue {issue_iid}: {e}")
@@ -202,7 +208,9 @@ class GitLabClient:
         """Create a label in a project"""
         try:
             project = self.get_project(project_id)
-            label = self._with_retries(lambda: project.labels.create({"name": name, "color": color}))
+            label = self._with_retries(
+                lambda: project.labels.create({"name": name, "color": color})
+            )
             logger.info(f"Created label '{name}' in project {project_id}")
             return label
         except Exception as e:
@@ -223,7 +231,9 @@ class GitLabClient:
         try:
             project = self.get_project(project_id)
             milestone = self._with_retries(lambda: project.milestones.create(milestone_data))
-            logger.info(f"Created milestone '{milestone_data.get('title')}' in project {project_id}")
+            logger.info(
+                f"Created milestone '{milestone_data.get('title')}' in project {project_id}"
+            )
             return milestone
         except Exception as e:
             logger.warning(f"Failed to create milestone: {e}")
@@ -254,19 +264,25 @@ class GitLabClient:
         path = f"/groups/{gid}/iterations"
         return self._with_retries(lambda: self.gl.http_list(path, query_data={"per_page": 100}))
 
-    def create_group_iteration(self, group_id: int, *, title: str, start_date: str, due_date: str) -> Optional[Dict[str, Any]]:
+    def create_group_iteration(
+        self, group_id: int, *, title: str, start_date: str, due_date: str
+    ) -> Optional[Dict[str, Any]]:
         """Create a group iteration (best-effort)."""
         gid = quote(str(int(group_id)), safe="")
         path = f"/groups/{gid}/iterations"
         try:
             return self._with_retries(
-                lambda: self.gl.http_post(path, post_data={"title": title, "start_date": start_date, "due_date": due_date})
+                lambda: self.gl.http_post(
+                    path, post_data={"title": title, "start_date": start_date, "due_date": due_date}
+                )
             )
         except Exception as e:
             logger.warning(f"Failed to create iteration '{title}' in group {group_id}: {e}")
             return None
 
-    def list_group_epics(self, group_id: int, *, search: Optional[str] = None) -> List[Dict[str, Any]]:
+    def list_group_epics(
+        self, group_id: int, *, search: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
         """List epics for a group (best-effort, returns raw dicts)."""
         gid = quote(str(int(group_id)), safe="")
         path = f"/groups/{gid}/epics"
@@ -275,14 +291,18 @@ class GitLabClient:
             query["search"] = search
         return self._with_retries(lambda: self.gl.http_list(path, query_data=query))
 
-    def add_issue_to_epic(self, group_id: int, epic_iid: int, *, issue_id: int) -> Optional[Dict[str, Any]]:
+    def add_issue_to_epic(
+        self, group_id: int, epic_iid: int, *, issue_id: int
+    ) -> Optional[Dict[str, Any]]:
         """Link an issue (by numeric issue ID) to an epic (by epic IID)."""
         gid = quote(str(int(group_id)), safe="")
         path = f"/groups/{gid}/epics/{int(epic_iid)}/issues/{int(issue_id)}"
         try:
             return self._with_retries(lambda: self.gl.http_post(path, post_data={}))
         except Exception as e:
-            logger.warning(f"Failed to link issue {issue_id} to epic &{epic_iid} in group {group_id}: {e}")
+            logger.warning(
+                f"Failed to link issue {issue_id} to epic &{epic_iid} in group {group_id}: {e}"
+            )
             return None
 
     def set_issue_time_estimate(self, project_id: str, issue_iid: int, seconds: int) -> Any:

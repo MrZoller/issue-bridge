@@ -1,7 +1,7 @@
+import logging
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
-import logging
 
 logging.disable(logging.CRITICAL)
 
@@ -111,8 +111,8 @@ class SyncServiceBehaviorTests(unittest.TestCase):
         self.assertIsNone(payload["due_date"])
 
     def test_sync_direction_recreates_when_target_issue_missing(self):
-        from app.services.sync_service import SyncService
         from app.models.sync_log import SyncDirection
+        from app.services.sync_service import SyncService
 
         # First query for synced_issue returns an existing mapping.
         synced_issue = SimpleNamespace(
@@ -155,8 +155,12 @@ class SyncServiceBehaviorTests(unittest.TestCase):
 
         recreated_issue = SimpleNamespace(iid=111, id=222)
 
-        with patch.object(svc, "_create_issue_from_source", return_value=recreated_issue, autospec=True), \
-             patch.object(svc, "_compute_synced_hash", return_value="hash", autospec=True):
+        with (
+            patch.object(
+                svc, "_create_issue_from_source", return_value=recreated_issue, autospec=True
+            ),
+            patch.object(svc, "_compute_synced_hash", return_value="hash", autospec=True),
+        ):
             stats = svc._sync_direction(
                 project_pair=SimpleNamespace(id=1),
                 source_client=_SourceClient(),
@@ -174,8 +178,8 @@ class SyncServiceBehaviorTests(unittest.TestCase):
         self.assertGreaterEqual(db.commits, 1)
 
     def test_sync_direction_does_not_recreate_on_target_403(self):
-        from app.services.sync_service import SyncService
         from app.models.sync_log import SyncDirection
+        from app.services.sync_service import SyncService
 
         synced_issue = SimpleNamespace(
             id=123,
@@ -212,8 +216,10 @@ class SyncServiceBehaviorTests(unittest.TestCase):
             def get_issue_optional(self, project_id, issue_iid):
                 return None, 403
 
-        with patch.object(svc, "_create_issue_from_source", autospec=True) as create_call, \
-             patch.object(svc, "_log_sync", autospec=True):
+        with (
+            patch.object(svc, "_create_issue_from_source", autospec=True) as create_call,
+            patch.object(svc, "_log_sync", autospec=True),
+        ):
             stats = svc._sync_direction(
                 project_pair=SimpleNamespace(id=1),
                 source_client=_SourceClient(),
@@ -229,8 +235,8 @@ class SyncServiceBehaviorTests(unittest.TestCase):
         self.assertEqual(stats["skipped_inaccessible"], 1)
 
     def test_sync_direction_rolls_back_on_issue_error(self):
-        from app.services.sync_service import SyncService
         from app.models.sync_log import SyncDirection
+        from app.services.sync_service import SyncService
 
         db = _FakeSession(first_queue=[None])
         svc = SyncService(db)
@@ -256,8 +262,12 @@ class SyncServiceBehaviorTests(unittest.TestCase):
         class _TargetClient:
             pass
 
-        with patch.object(svc, "_create_issue_from_source", side_effect=RuntimeError("boom"), autospec=True), \
-             patch.object(svc, "_log_sync", autospec=True):
+        with (
+            patch.object(
+                svc, "_create_issue_from_source", side_effect=RuntimeError("boom"), autospec=True
+            ),
+            patch.object(svc, "_log_sync", autospec=True),
+        ):
             stats = svc._sync_direction(
                 project_pair=SimpleNamespace(id=1),
                 source_client=_SourceClient(),

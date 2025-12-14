@@ -1,12 +1,14 @@
 """Project pair management endpoints"""
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
-from typing import List, Optional
-from pydantic import BaseModel
-from datetime import datetime
 
-from app.models.base import get_db
+from datetime import datetime
+from typing import List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
 from app.models import ProjectPair
+from app.models.base import get_db
 from app.scheduler import scheduler
 
 router = APIRouter(prefix="/api/project-pairs", tags=["project-pairs"])
@@ -77,9 +79,7 @@ def get_project_pair(pair_id: int, db: Session = Depends(get_db)):
 
 
 @router.put("/{pair_id}", response_model=ProjectPairResponse)
-def update_project_pair(
-    pair_id: int, pair: ProjectPairCreate, db: Session = Depends(get_db)
-):
+def update_project_pair(pair_id: int, pair: ProjectPairCreate, db: Session = Depends(get_db)):
     """Update a project pair"""
     db_pair = db.query(ProjectPair).filter(ProjectPair.id == pair_id).first()
     if not db_pair:
