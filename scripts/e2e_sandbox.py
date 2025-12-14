@@ -38,13 +38,13 @@ import time
 import uuid
 from dataclasses import dataclass
 from datetime import date, timedelta
-from typing import Optional
+from typing import NoReturn, Optional
 from urllib.parse import quote
 
 import gitlab
 
 
-def _die(msg: str) -> "NoReturn":  # type: ignore[name-defined]
+def _die(msg: str) -> NoReturn:
     print(f"[e2e] ERROR: {msg}", file=sys.stderr)
     raise SystemExit(2)
 
@@ -99,7 +99,9 @@ def _parse_int(v: Optional[str]) -> Optional[int]:
         return None
 
 
-def _resolve_namespace_id(gl: gitlab.Gitlab, *, ns_id: Optional[int], ns_path: Optional[str]) -> Optional[int]:
+def _resolve_namespace_id(
+    gl: gitlab.Gitlab, *, ns_id: Optional[int], ns_path: Optional[str]
+) -> Optional[int]:
     if ns_id is not None:
         return int(ns_id)
     if not ns_path:
@@ -171,7 +173,11 @@ def _http_post(gl: gitlab.Gitlab, path: str, *, post_data: dict) -> None:
 def _set_time_estimate(gl: gitlab.Gitlab, *, project_id: int, issue_iid: int, seconds: int) -> None:
     pid = quote(str(int(project_id)), safe="")
     iid = quote(str(int(issue_iid)), safe="")
-    _http_post(gl, f"/projects/{pid}/issues/{iid}/time_estimate", post_data={"duration": f"{int(seconds)}s"})
+    _http_post(
+        gl,
+        f"/projects/{pid}/issues/{iid}/time_estimate",
+        post_data={"duration": f"{int(seconds)}s"},
+    )
 
 
 def _load_config() -> _Config:
@@ -218,8 +224,12 @@ def main() -> int:
     src_gl = _gitlab(cfg.source.url, cfg.source.token)
     tgt_gl = _gitlab(cfg.target.url, cfg.target.token)
 
-    src_ns_id = _resolve_namespace_id(src_gl, ns_id=cfg.source.namespace_id, ns_path=cfg.source.namespace_path)
-    tgt_ns_id = _resolve_namespace_id(tgt_gl, ns_id=cfg.target.namespace_id, ns_path=cfg.target.namespace_path)
+    src_ns_id = _resolve_namespace_id(
+        src_gl, ns_id=cfg.source.namespace_id, ns_path=cfg.source.namespace_path
+    )
+    tgt_ns_id = _resolve_namespace_id(
+        tgt_gl, ns_id=cfg.target.namespace_id, ns_path=cfg.target.namespace_path
+    )
 
     src_project = None
     tgt_project = None
@@ -231,8 +241,12 @@ def main() -> int:
         desc = f"IssueBridge automated E2E sandbox ({cfg.run_id}). Safe to delete."
 
         print("[e2e] creating GitLab projects…")
-        src_project = _create_project(src_gl, name=src_name, namespace_id=src_ns_id, description=desc)
-        tgt_project = _create_project(tgt_gl, name=tgt_name, namespace_id=tgt_ns_id, description=desc)
+        src_project = _create_project(
+            src_gl, name=src_name, namespace_id=src_ns_id, description=desc
+        )
+        tgt_project = _create_project(
+            tgt_gl, name=tgt_name, namespace_id=tgt_ns_id, description=desc
+        )
 
         src_project_id = int(getattr(src_project, "id"))
         tgt_project_id = int(getattr(tgt_project, "id"))
@@ -240,7 +254,9 @@ def main() -> int:
         # Seed source project
         print("[e2e] seeding source project…")
         label_bug = getattr(src_project, "labels").create({"name": "bug", "color": "#d73a4a"})  # type: ignore[attr-defined]
-        label_feature = getattr(src_project, "labels").create({"name": "feature", "color": "#0e8a16"})  # type: ignore[attr-defined]
+        label_feature = getattr(src_project, "labels").create(
+            {"name": "feature", "color": "#0e8a16"}
+        )  # type: ignore[attr-defined]
         milestone = getattr(src_project, "milestones").create({"title": f"E2E {cfg.run_id}"})  # type: ignore[attr-defined]
 
         due = (date.today() + timedelta(days=7)).isoformat()
@@ -269,7 +285,9 @@ def main() -> int:
 
         # Best-effort time estimate (not all GitLab plans enable time tracking).
         try:
-            _set_time_estimate(src_gl, project_id=src_project_id, issue_iid=int(issue1.iid), seconds=3600)
+            _set_time_estimate(
+                src_gl, project_id=src_project_id, issue_iid=int(issue1.iid), seconds=3600
+            )
         except Exception as e:
             print(f"[e2e] WARN: could not set time estimate (best-effort): {e}", file=sys.stderr)
 
@@ -328,12 +346,16 @@ def main() -> int:
 
             # Verify target has issues + markers
             tgt_project_ref = tgt_gl.projects.get(tgt_project_id)
-            tgt_issues = tgt_project_ref.issues.list(get_all=True, state="all", order_by="iid", sort="asc")
+            tgt_issues = tgt_project_ref.issues.list(
+                get_all=True, state="all", order_by="iid", sort="asc"
+            )
             if len(tgt_issues) < 2:
                 _die(f"expected >=2 issues on target, found {len(tgt_issues)}")
 
             # Find the mirrored issue by title
-            mirrored = next((i for i in tgt_issues if f"E2E issue 1 ({cfg.run_id})" in i.title), None)
+            mirrored = next(
+                (i for i in tgt_issues if f"E2E issue 1 ({cfg.run_id})" in i.title), None
+            )
             if mirrored is None:
                 _die("could not find mirrored issue 1 on target by title")
 
@@ -348,11 +370,15 @@ def main() -> int:
                 _die("expected sync reference + marker in target description")
 
             # Closed issue should be closed
-            mirrored_closed = next((i for i in tgt_issues if f"E2E closed issue ({cfg.run_id})" in i.title), None)
+            mirrored_closed = next(
+                (i for i in tgt_issues if f"E2E closed issue ({cfg.run_id})" in i.title), None
+            )
             if mirrored_closed is None:
                 _die("could not find mirrored closed issue on target by title")
             if getattr(mirrored_closed, "state", None) != "closed":
-                _die(f"expected closed state on target, got {getattr(mirrored_closed, 'state', None)}")
+                _die(
+                    f"expected closed state on target, got {getattr(mirrored_closed, 'state', None)}"
+                )
 
             # Notes should exist and have markers
             notes = tgt_project_ref.issues.get(int(mirrored.iid)).notes.list(  # type: ignore[attr-defined]
@@ -371,13 +397,17 @@ def main() -> int:
 
             tgt_issues2 = tgt_project_ref.issues.list(get_all=True, state="all")
             if len(tgt_issues2) != len(tgt_issues):
-                _die(f"expected stable issue count on target; {len(tgt_issues)} -> {len(tgt_issues2)}")
+                _die(
+                    f"expected stable issue count on target; {len(tgt_issues)} -> {len(tgt_issues2)}"
+                )
 
             notes2 = tgt_project_ref.issues.get(int(mirrored.iid)).notes.list(  # type: ignore[attr-defined]
                 get_all=True, per_page=100, order_by="created_at", sort="asc"
             )
             if len(notes2) != len(notes):
-                _die(f"expected stable note count on idempotency run; {len(notes)} -> {len(notes2)}")
+                _die(
+                    f"expected stable note count on idempotency run; {len(notes)} -> {len(notes2)}"
+                )
 
             # Update source issue + add a new comment; ensure target updates and doesn't duplicate old notes
             print("[e2e] applying source update + new comment…")
@@ -441,11 +471,15 @@ def main() -> int:
                 (i for i in src_issues if f"E2E created on target ({cfg.run_id})" in i.title), None
             )
             if mirrored_on_source is None:
-                _die("expected target-created issue to be mirrored onto source in bidirectional mode")
+                _die(
+                    "expected target-created issue to be mirrored onto source in bidirectional mode"
+                )
 
             src_desc = getattr(mirrored_on_source, "description", "") or ""
             if "*Synced from:" not in src_desc or "gl-issue-sync:" not in src_desc:
-                _die("expected sync reference + marker in source description for target-created issue")
+                _die(
+                    "expected sync reference + marker in source description for target-created issue"
+                )
 
             # Create a comment on the target-created issue; ensure it syncs to source once and doesn't ping-pong back.
             tgt_created_issue = tgt_project_ref.issues.get(tgt_created_iid)  # type: ignore[attr-defined]
@@ -461,13 +495,20 @@ def main() -> int:
             src_notes = src_issue_full.notes.list(  # type: ignore[attr-defined]
                 get_all=True, per_page=100, order_by="created_at", sort="asc"
             )
-            if not any("note from target (bidirectional)" in (getattr(n, "body", "") or "") for n in src_notes):
+            if not any(
+                "note from target (bidirectional)" in (getattr(n, "body", "") or "")
+                for n in src_notes
+            ):
                 _die("expected target note to sync to source in bidirectional mode")
 
             tgt_notes_after = tgt_created_issue.notes.list(  # type: ignore[attr-defined]
                 get_all=True, per_page=100, order_by="created_at", sort="asc"
             )
-            if any("note from target (bidirectional)" in (getattr(n, "body", "") or "") and "gl-issue-sync-note:" in (getattr(n, "body", "") or "") for n in tgt_notes_after):
+            if any(
+                "note from target (bidirectional)" in (getattr(n, "body", "") or "")
+                and "gl-issue-sync-note:" in (getattr(n, "body", "") or "")
+                for n in tgt_notes_after
+            ):
                 _die("unexpected ping-pong: target appears to contain a synced-back note marker")
 
             # Final idempotency check across both projects.
@@ -479,9 +520,13 @@ def main() -> int:
             src_issues2 = src_project_ref.issues.list(get_all=True, state="all")
             tgt_issues3 = tgt_project_ref.issues.list(get_all=True, state="all")
             if len(src_issues2) != len(src_issues):
-                _die(f"expected stable issue count on source; {len(src_issues)} -> {len(src_issues2)}")
+                _die(
+                    f"expected stable issue count on source; {len(src_issues)} -> {len(src_issues2)}"
+                )
             if len(tgt_issues3) != len(tgt_issues2):
-                _die(f"expected stable issue count on target; {len(tgt_issues2)} -> {len(tgt_issues3)}")
+                _die(
+                    f"expected stable issue count on target; {len(tgt_issues2)} -> {len(tgt_issues3)}"
+                )
 
             # Keep references in locals so linters don't complain about "unused"
             _ = (note1, note2, note3)
@@ -515,4 +560,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
