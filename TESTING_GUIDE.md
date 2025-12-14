@@ -817,6 +817,53 @@ After successful testing:
 
 ---
 
+## Automated E2E Sandbox (less manual, uses real GitLab API)
+
+If you want higher confidence before touching real projects/data, you can run an **opt-in end-to-end sandbox** that:
+
+- creates **temporary source + target GitLab projects**
+- seeds issues/labels/milestones/comments
+- runs IssueBridge sync against those real projects
+- verifies creation + update propagation + comment dedupe/idempotency
+- deletes the temporary projects afterward (unless you keep them)
+
+### Requirements
+
+- A GitLab Personal Access Token with **`api`** scope (the script creates/deletes projects).
+- A namespace you control:
+  - either **`E2E_NAMESPACE_ID`** (numeric), or
+  - **`E2E_NAMESPACE_PATH`** (e.g. `group/subgroup`)
+
+### Run it
+
+```bash
+export ISSUEBRIDGE_E2E=1
+export E2E_GITLAB_URL="https://gitlab.com"            # optional; default is gitlab.com
+export E2E_GITLAB_TOKEN="...YOUR_TOKEN..."            # required
+export E2E_NAMESPACE_PATH="your-group/your-subgroup"  # or set E2E_NAMESPACE_ID
+
+python3 scripts/e2e_sandbox.py
+```
+
+### Keep the sandbox projects for inspection (optional)
+
+```bash
+export E2E_KEEP=1
+python3 scripts/e2e_sandbox.py
+```
+
+### Run via unittest (optional)
+
+The test is **skipped by default** and only runs when you opt in:
+
+```bash
+export ISSUEBRIDGE_E2E=1
+export E2E_GITLAB_TOKEN="...YOUR_TOKEN..."
+export E2E_NAMESPACE_PATH="your-group/your-subgroup"
+
+python3 -m unittest tests.test_e2e_sandbox_gitlab
+```
+
 ## Support and Feedback
 
 If you encounter issues during testing:
