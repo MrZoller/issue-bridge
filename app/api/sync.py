@@ -1,13 +1,14 @@
 """Sync management endpoints"""
-from fastapi import APIRouter, Body, Depends, HTTPException, Request
-from sqlalchemy.orm import Session
-from typing import List, Optional
-from pydantic import BaseModel
-from datetime import datetime
 
+from datetime import datetime
+from typing import List, Optional
+
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
+from app.models import Conflict, SyncedIssue, SyncLog
 from app.models.base import get_db
-from app.models import SyncLog, Conflict, SyncedIssue
-from app.models.sync_log import SyncStatus
 from app.services.sync_service import SyncService
 
 router = APIRouter(prefix="/api/sync", tags=["sync"])
@@ -16,11 +17,11 @@ router = APIRouter(prefix="/api/sync", tags=["sync"])
 class SyncLogResponse(BaseModel):
     id: int
     project_pair_id: int
-    source_issue_iid: int = None
-    target_issue_iid: int = None
+    source_issue_iid: Optional[int] = None
+    target_issue_iid: Optional[int] = None
     status: str
-    direction: str = None
-    message: str = None
+    direction: Optional[str] = None
+    message: Optional[str] = None
     created_at: datetime
 
     class Config:
@@ -31,7 +32,7 @@ class ConflictResponse(BaseModel):
     id: int
     project_pair_id: int
     source_issue_iid: int
-    target_issue_iid: int = None
+    target_issue_iid: Optional[int] = None
     conflict_type: str
     description: str
     resolved: bool
@@ -64,6 +65,7 @@ def trigger_sync(pair_id: int, db: Session = Depends(get_db)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @router.post("/{pair_id}/repair-mappings")
 def repair_mappings(pair_id: int, db: Session = Depends(get_db)):
     """Rebuild SyncedIssue rows from embedded sync markers (safe, non-destructive)."""
@@ -77,11 +79,7 @@ def repair_mappings(pair_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/logs", response_model=List[SyncLogResponse])
-def list_sync_logs(
-    limit: int = 100,
-    project_pair_id: int = None,
-    db: Session = Depends(get_db)
-):
+def list_sync_logs(limit: int = 100, project_pair_id: int = None, db: Session = Depends(get_db)):
     """List sync logs"""
     query = db.query(SyncLog).order_by(SyncLog.created_at.desc())
     if project_pair_id:
@@ -92,9 +90,7 @@ def list_sync_logs(
 
 @router.get("/conflicts", response_model=List[ConflictResponse])
 def list_conflicts(
-    resolved: bool = None,
-    project_pair_id: int = None,
-    db: Session = Depends(get_db)
+    resolved: bool = None, project_pair_id: int = None, db: Session = Depends(get_db)
 ):
     """List conflicts"""
     query = db.query(Conflict).order_by(Conflict.created_at.desc())
@@ -111,7 +107,7 @@ def resolve_conflict(
     conflict_id: int,
     request: Request,
     resolution_notes: Optional[str] = Body(None, embed=True),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """Mark a conflict as resolved"""
     # Backwards compatibility: older clients may still pass ?resolution_notes=...
@@ -131,10 +127,7 @@ def resolve_conflict(
 
 
 @router.get("/synced-issues", response_model=List[SyncedIssueResponse])
-def list_synced_issues(
-    project_pair_id: int = None,
-    db: Session = Depends(get_db)
-):
+def list_synced_issues(project_pair_id: int = None, db: Session = Depends(get_db)):
     """List synced issues"""
     query = db.query(SyncedIssue).order_by(SyncedIssue.last_synced_at.desc())
     if project_pair_id:

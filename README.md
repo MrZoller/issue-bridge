@@ -1,5 +1,9 @@
 # IssueBridge
 
+[![tests](https://img.shields.io/github/actions/workflow/status/MrZoller/issue-bridge/tests.yml.png?branch=main&label=tests)](https://github.com/MrZoller/issue-bridge/actions/workflows/tests.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.png)](LICENSE)
+[![Python: 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.png)](https://www.python.org/)
+
 A comprehensive service for synchronizing GitLab issues between different GitLab instances. This tool is perfect for organizations that maintain mirrors of their repositories across multiple GitLab instances and need to keep issues in sync.
 
 ## Features
@@ -14,6 +18,51 @@ A comprehensive service for synchronizing GitLab issues between different GitLab
 - **Docker Support**: Run as a containerized service
 - **Detailed Logging**: Complete audit trail of all sync operations
 - **Issue Linking**: Adds cross-references between synced issues
+
+## Web UI (demo screenshots)
+
+These screenshots are generated from seeded **demo data** (no real tokens; no GitLab calls):
+
+- **Dashboard**:
+
+![Dashboard](docs/screenshots/dashboard.png)
+
+- **GitLab Instances**:
+
+![GitLab Instances](docs/screenshots/instances.png)
+
+- **Project Pairs**:
+
+![Project Pairs](docs/screenshots/project-pairs.png)
+
+- **User Mappings**:
+
+![User Mappings](docs/screenshots/user-mappings.png)
+
+- **Sync Logs**:
+
+![Sync Logs](docs/screenshots/sync-logs.png)
+
+- **Conflicts**:
+
+![Conflicts](docs/screenshots/conflicts.png)
+
+### Demo data included in the screenshots
+
+- **2 GitLab instances**: “Production” + “Development” (fake tokens)
+- **2 project pairs**: one enabled (bi-directional), one disabled (one-way)
+- **2 user mappings**
+- **12 synced issue mappings**
+- **3 sync log entries** (success, conflict, failed)
+- **2 conflicts** (one unresolved, one resolved)
+
+### Regenerating screenshots locally
+
+```bash
+python3 -m pip install -r scripts/requirements-screenshots.txt
+python3 -m playwright install chromium
+python3 scripts/generate_ui_screenshots.py --db ./data/demo_issuebridge.db --out ./docs/screenshots --overwrite
+```
 
 ## Architecture
 
@@ -131,7 +180,13 @@ docker-compose exec issuebridge sqlite3 /data/issuebridge.db
 
 ### Environment Variables
 
-Create a `.env` file or set these environment variables:
+Start by copying the example file:
+
+```bash
+cp .env.example .env
+```
+
+Then edit `.env` (or set environment variables via your process manager). The supported keys are:
 
 ```env
 # Database Configuration
@@ -146,7 +201,21 @@ DEFAULT_SYNC_INTERVAL_MINUTES=10
 
 # Logging
 LOG_LEVEL=INFO
+
+# Auth (optional)
+AUTH_ENABLED=false
+AUTH_USERNAME=admin
+AUTH_PASSWORD=change-me
 ```
+
+Notes:
+
+- `DATABASE_URL`: SQLite by default. For Docker, it’s typically set to a path under `/data/` via `docker-compose.yml`.
+- `HOST`/`PORT`: where the web UI/API binds.
+- `DEFAULT_SYNC_INTERVAL_MINUTES`: default interval for newly-created project pairs.
+- `LOG_LEVEL`: e.g. `DEBUG`, `INFO`, `WARNING`, `ERROR`.
+- `AUTH_ENABLED`: set `true` to protect the UI/API with built-in HTTP Basic auth (recommended if you expose this beyond localhost/private networks).
+- `AUTH_USERNAME` / `AUTH_PASSWORD`: credentials used when `AUTH_ENABLED=true`.
 
 ### GitLab Access Tokens
 
@@ -479,6 +548,8 @@ python3 -m unittest discover -s tests -p 'test_*.py'
 - **Network**: Consider running in a private network
 - **Database**: Protect the database file (contains access tokens)
 - **Permissions**: Use least-privilege access tokens
+- **No built-in auth**: The web UI and API endpoints are not authenticated by default. If you expose this beyond localhost/private networks, run it behind an auth layer (reverse proxy with SSO/basic auth) and restrict inbound network access.
+- **Built-in auth option**: You can enable HTTP Basic auth by setting `AUTH_ENABLED=true` plus `AUTH_USERNAME`/`AUTH_PASSWORD`.
 
 ## Limitations
 
@@ -500,7 +571,7 @@ Possible future improvements:
 
 ## License
 
-[Add your license here]
+MIT License. See [`LICENSE`](LICENSE).
 
 ## Support
 

@@ -51,6 +51,21 @@ We welcome feature requests! Please open an issue with:
    git checkout -b feature/your-feature-name
    ```
 
+## Regenerating Web UI screenshots (docs)
+
+The repo includes a small, repeatable workflow to generate the screenshots embedded in the docs (using **seeded demo data**, with **fake tokens** and **no GitLab calls**).
+
+```bash
+python3 -m pip install -r requirements.txt
+python3 -m pip install -r scripts/requirements-screenshots.txt
+python3 -m playwright install chromium
+
+python3 scripts/generate_ui_screenshots.py \
+  --db ./data/demo_issuebridge.db \
+  --out ./docs/screenshots \
+  --overwrite
+```
+
 ## Coding Standards
 
 - Write clear, readable code

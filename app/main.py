@@ -1,16 +1,19 @@
 """Main FastAPI application"""
+
 import logging
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.requests import Request
 
+from app.api import dashboard, instances, project_pairs, sync, user_mappings
 from app.config import settings
 from app.models.base import init_db
-from app.api import instances, project_pairs, user_mappings, sync, dashboard
 from app.scheduler import scheduler
+from app.security import BasicAuthMiddleware
 
 # Configure logging
 logging.basicConfig(
@@ -39,6 +42,17 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+
+# Optional built-in auth (recommended if exposed beyond localhost/private networks)
+if settings.auth_enabled:
+    if not settings.auth_username or not settings.auth_password:
+        raise RuntimeError("AUTH_ENABLED=true requires AUTH_USERNAME and AUTH_PASSWORD to be set")
+    app.add_middleware(
+        BasicAuthMiddleware,
+        username=settings.auth_username,
+        password=settings.auth_password,
+        allow_paths={"/health"},
+    )
 
 # Include API routers
 app.include_router(instances.router)

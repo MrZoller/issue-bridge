@@ -13,7 +13,9 @@ class NotePermissionStatsTests(unittest.TestCase):
 
         # Source client raises 403 when fetching notes
         source_client = Mock()
-        source_client.get_issue_notes.side_effect = gitlab.exceptions.GitlabGetError("forbidden", 403)
+        source_client.get_issue_notes.side_effect = gitlab.exceptions.GitlabGetError(
+            "forbidden", 403
+        )
 
         target_client = Mock()
 

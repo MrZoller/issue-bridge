@@ -1,7 +1,8 @@
 """Database base configuration"""
+
 from sqlalchemy import create_engine
-from sqlalchemy.orm import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import declarative_base, sessionmaker
+
 from app.config import settings
 
 engine = create_engine(
@@ -67,9 +68,7 @@ def _sqlite_conflicts_make_target_issue_iid_nullable():
             "conflict_type, description, source_data, target_data, resolved, resolved_at, "
             "resolution_notes, created_at"
         )
-        conn.exec_driver_sql(
-            f"INSERT INTO conflicts ({cols}) SELECT {cols} FROM conflicts_old"
-        )
+        conn.exec_driver_sql(f"INSERT INTO conflicts ({cols}) SELECT {cols} FROM conflicts_old")
         conn.exec_driver_sql("DROP TABLE conflicts_old")
 
 

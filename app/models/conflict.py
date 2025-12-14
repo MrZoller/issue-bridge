@@ -1,7 +1,10 @@
 """Conflict model"""
-from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, Text, Boolean
-from sqlalchemy.orm import relationship
+
 from datetime import datetime
+
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy.orm import relationship
+
 from app.models.base import Base
 
 
@@ -25,7 +28,9 @@ class Conflict(Base):
     target_issue_iid = Column(Integer, nullable=True)
 
     # Conflict details
-    conflict_type = Column(String, nullable=False)  # e.g., "concurrent_update", "deleted_on_one_side"
+    conflict_type = Column(
+        String, nullable=False
+    )  # e.g., "concurrent_update", "deleted_on_one_side"
     description = Column(Text, nullable=False)
     source_data = Column(Text, nullable=True)  # JSON snapshot of source
     target_data = Column(Text, nullable=True)  # JSON snapshot of target

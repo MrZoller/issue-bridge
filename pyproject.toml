@@ -1,0 +1,22 @@
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+# Keep this lightweight to start; expand as the codebase matures.
+select = [
+  "E",  # pycodestyle errors
+  "F",  # pyflakes
+  "I",  # import sorting
+]
+ignore = [
+  "E501", # line length (handled separately; allow long strings/docs)
+  "E712", # comparisons to True/False (often intentional with SQLAlchemy expressions)
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app", "tests"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"

@@ -1,0 +1,106 @@
+name: docs-pdf
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [main]
+  release:
+    types: [published]
+
+jobs:
+  build-pdfs:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare output directory
+        run: |
+          mkdir -p docs-pdfs
+
+      - name: Build README.pdf
+        uses: docker://pandoc/latex:3.1
+        with:
+          args: >-
+            --from=gfm
+            --resource-path=.
+            --lua-filter=scripts/pandoc/strip_svg_images.lua
+            --lua-filter=scripts/pandoc/strip_emoji.lua
+            --toc
+            --pdf-engine=xelatex
+            -V geometry:margin=1in
+            README.md
+            -o docs-pdfs/README.pdf
+
+      - name: Build QUICKSTART.pdf
+        uses: docker://pandoc/latex:3.1
+        with:
+          args: >-
+            --from=gfm
+            --resource-path=.
+            --lua-filter=scripts/pandoc/strip_svg_images.lua
+            --lua-filter=scripts/pandoc/strip_emoji.lua
+            --toc
+            --pdf-engine=xelatex
+            -V geometry:margin=1in
+            QUICKSTART.md
+            -o docs-pdfs/QUICKSTART.pdf
+
+      - name: Build TESTING_GUIDE.pdf
+        uses: docker://pandoc/latex:3.1
+        with:
+          args: >-
+            --from=gfm
+            --resource-path=.
+            --lua-filter=scripts/pandoc/strip_svg_images.lua
+            --lua-filter=scripts/pandoc/strip_emoji.lua
+            --toc
+            --pdf-engine=xelatex
+            -V geometry:margin=1in
+            TESTING_GUIDE.md
+            -o docs-pdfs/TESTING_GUIDE.pdf
+
+      - name: Build CONTRIBUTING.pdf
+        uses: docker://pandoc/latex:3.1
+        with:
+          args: >-
+            --from=gfm
+            --resource-path=.
+            --lua-filter=scripts/pandoc/strip_svg_images.lua
+            --lua-filter=scripts/pandoc/strip_emoji.lua
+            --toc
+            --pdf-engine=xelatex
+            -V geometry:margin=1in
+            CONTRIBUTING.md
+            -o docs-pdfs/CONTRIBUTING.pdf
+
+      - name: Build SECURITY.pdf
+        uses: docker://pandoc/latex:3.1
+        with:
+          args: >-
+            --from=gfm
+            --resource-path=.
+            --lua-filter=scripts/pandoc/strip_svg_images.lua
+            --lua-filter=scripts/pandoc/strip_emoji.lua
+            --toc
+            --pdf-engine=xelatex
+            -V geometry:margin=1in
+            SECURITY.md
+            -o docs-pdfs/SECURITY.pdf
+
+      - name: Upload PDFs
+        uses: actions/upload-artifact@v4
+        with:
+          name: docs-pdfs
+          path: docs-pdfs/*.pdf
+          if-no-files-found: error
+
+      - name: Attach PDFs to GitHub Release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: docs-pdfs/*.pdf

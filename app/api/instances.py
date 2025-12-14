@@ -1,12 +1,14 @@
 """GitLab instance management endpoints"""
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
-from typing import List
-from pydantic import BaseModel
-from datetime import datetime
 
-from app.models.base import get_db
+from datetime import datetime
+from typing import List
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
 from app.models import GitLabInstance
+from app.models.base import get_db
 
 router = APIRouter(prefix="/api/instances", tags=["instances"])
 
@@ -41,9 +43,7 @@ def list_instances(db: Session = Depends(get_db)):
 def create_instance(instance: GitLabInstanceCreate, db: Session = Depends(get_db)):
     """Create a new GitLab instance"""
     # Check if name already exists
-    existing = db.query(GitLabInstance).filter(
-        GitLabInstance.name == instance.name
-    ).first()
+    existing = db.query(GitLabInstance).filter(GitLabInstance.name == instance.name).first()
     if existing:
         raise HTTPException(status_code=400, detail="Instance name already exists")
 
@@ -57,9 +57,7 @@ def create_instance(instance: GitLabInstanceCreate, db: Session = Depends(get_db
 @router.get("/{instance_id}", response_model=GitLabInstanceResponse)
 def get_instance(instance_id: int, db: Session = Depends(get_db)):
     """Get a specific GitLab instance"""
-    instance = db.query(GitLabInstance).filter(
-        GitLabInstance.id == instance_id
-    ).first()
+    instance = db.query(GitLabInstance).filter(GitLabInstance.id == instance_id).first()
     if not instance:
         raise HTTPException(status_code=404, detail="Instance not found")
     return instance
@@ -70,9 +68,7 @@ def update_instance(
     instance_id: int, instance: GitLabInstanceCreate, db: Session = Depends(get_db)
 ):
     """Update a GitLab instance"""
-    db_instance = db.query(GitLabInstance).filter(
-        GitLabInstance.id == instance_id
-    ).first()
+    db_instance = db.query(GitLabInstance).filter(GitLabInstance.id == instance_id).first()
     if not db_instance:
         raise HTTPException(status_code=404, detail="Instance not found")
 
@@ -87,9 +83,7 @@ def update_instance(
 @router.delete("/{instance_id}")
 def delete_instance(instance_id: int, db: Session = Depends(get_db)):
     """Delete a GitLab instance"""
-    instance = db.query(GitLabInstance).filter(
-        GitLabInstance.id == instance_id
-    ).first()
+    instance = db.query(GitLabInstance).filter(GitLabInstance.id == instance_id).first()
     if not instance:
         raise HTTPException(status_code=404, detail="Instance not found")
 

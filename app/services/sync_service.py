@@ -1,24 +1,26 @@
 """Issue synchronization service"""
-import logging
+
 import hashlib
 import json
+import logging
 import re
-from typing import Dict, Any, Optional, List, Tuple
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
-from sqlalchemy.orm import Session
-from sqlalchemy.exc import IntegrityError
+from typing import Any, Dict, List, Optional, Tuple
+
 import gitlab
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
 from app.models import (
-    ProjectPair,
+    Conflict,
     GitLabInstance,
+    ProjectPair,
     SyncedIssue,
     SyncLog,
-    Conflict,
     UserMapping,
 )
-from app.models.sync_log import SyncStatus, SyncDirection
+from app.models.sync_log import SyncDirection, SyncStatus
 from app.services.gitlab_client import GitLabClient
 
 logger = logging.getLogger(__name__)
@@ -71,12 +73,14 @@ class SyncService:
     @staticmethod
     def _b64_json(data: Dict[str, Any]) -> str:
         import base64
+
         raw = json.dumps(data, sort_keys=True, separators=(",", ":")).encode("utf-8")
         return base64.b64encode(raw).decode("ascii")
 
     @staticmethod
     def _b64_json_load(value: str) -> Optional[Dict[str, Any]]:
         import base64
+
         try:
             raw = base64.b64decode(value.encode("ascii"))
             obj = json.loads(raw.decode("utf-8"))
@@ -85,7 +89,9 @@ class SyncService:
             return None
 
     @classmethod
-    def _issue_marker(cls, *, source_instance_url: str, source_project_id: str, source_issue_iid: int) -> str:
+    def _issue_marker(
+        cls, *, source_instance_url: str, source_project_id: str, source_issue_iid: int
+    ) -> str:
         payload = {
             "v": 1,
             "source_instance_url": cls._normalize_instance_url(source_instance_url),
@@ -222,9 +228,9 @@ class SyncService:
     def _get_client(self, instance_id: int) -> GitLabClient:
         """Get or create GitLab client for instance"""
         if instance_id not in self.clients:
-            instance = self.db.query(GitLabInstance).filter(
-                GitLabInstance.id == instance_id
-            ).first()
+            instance = (
+                self.db.query(GitLabInstance).filter(GitLabInstance.id == instance_id).first()
+            )
             if not instance:
                 raise ValueError(f"GitLab instance {instance_id} not found")
             self.clients[instance_id] = GitLabClient(instance.url, instance.access_token)
@@ -234,11 +240,15 @@ class SyncService:
         self, username: str, source_instance_id: int, target_instance_id: int
     ) -> Optional[str]:
         """Get mapped username for target instance"""
-        mapping = self.db.query(UserMapping).filter(
-            UserMapping.source_instance_id == source_instance_id,
-            UserMapping.source_username == username,
-            UserMapping.target_instance_id == target_instance_id,
-        ).first()
+        mapping = (
+            self.db.query(UserMapping)
+            .filter(
+                UserMapping.source_instance_id == source_instance_id,
+                UserMapping.source_username == username,
+                UserMapping.target_instance_id == target_instance_id,
+            )
+            .first()
+        )
         return mapping.target_username if mapping else None
 
     def _map_usernames(
@@ -281,6 +291,7 @@ class SyncService:
 
     def _compute_issue_hash(self, issue: Any) -> str:
         """Compute hash of issue content for change detection"""
+
         def _time_estimate_seconds(obj: Any) -> Optional[int]:
             ts = getattr(obj, "time_stats", None)
             if ts is None:
@@ -323,7 +334,8 @@ class SyncService:
             "time_estimate_seconds": _time_estimate_seconds(issue),
             "issue_type": getattr(issue, "issue_type", None),
             "iteration": self._safe_attr(getattr(issue, "iteration", None), "title"),
-            "epic": self._safe_attr(getattr(issue, "epic", None), "title") or getattr(issue, "epic_iid", None),
+            "epic": self._safe_attr(getattr(issue, "epic", None), "title")
+            or getattr(issue, "epic_iid", None),
         }
         return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
 
@@ -363,13 +375,19 @@ class SyncService:
         if epic:
             if isinstance(epic, dict):
                 return epic
-            return {"id": getattr(epic, "id", None), "iid": getattr(epic, "iid", None), "title": getattr(epic, "title", None)}
+            return {
+                "id": getattr(epic, "id", None),
+                "iid": getattr(epic, "iid", None),
+                "title": getattr(epic, "title", None),
+            }
         epic_iid = getattr(issue, "epic_iid", None)
         if epic_iid:
             return {"iid": epic_iid}
         return None
 
-    def _map_iteration_id(self, target_client: GitLabClient, target_project_id: str, source_iteration: Dict[str, Any]) -> Optional[int]:
+    def _map_iteration_id(
+        self, target_client: GitLabClient, target_project_id: str, source_iteration: Dict[str, Any]
+    ) -> Optional[int]:
         title = source_iteration.get("title")
         if not title:
             return None
@@ -391,7 +409,9 @@ class SyncService:
         start_date = source_iteration.get("start_date")
         due_date = source_iteration.get("due_date")
         if start_date and due_date:
-            created = target_client.create_group_iteration(group_id, title=str(title), start_date=str(start_date), due_date=str(due_date))
+            created = target_client.create_group_iteration(
+                group_id, title=str(title), start_date=str(start_date), due_date=str(due_date)
+            )
             if created and created.get("id") is not None:
                 try:
                     return int(created["id"])
@@ -399,7 +419,9 @@ class SyncService:
                     return None
         return None
 
-    def _map_epic_iid(self, target_client: GitLabClient, target_project_id: str, source_epic: Dict[str, Any]) -> Optional[int]:
+    def _map_epic_iid(
+        self, target_client: GitLabClient, target_project_id: str, source_epic: Dict[str, Any]
+    ) -> Optional[int]:
         # Prefer title-based mapping (IIDs differ across instances).
         title = source_epic.get("title")
         if not title:
@@ -535,6 +557,7 @@ class SyncService:
         stats: Optional[Dict[str, int]] = None,
     ) -> Any:
         """Create a new issue in target from source issue"""
+
         def _time_estimate_seconds(obj: Any) -> Optional[int]:
             ts = getattr(obj, "time_stats", None)
             if ts is None:
@@ -552,7 +575,7 @@ class SyncService:
 
         # Map assignees
         assignee_ids = []
-        if hasattr(source_issue, 'assignees') and source_issue.assignees:
+        if hasattr(source_issue, "assignees") and source_issue.assignees:
             assignee_usernames = [
                 u for u in (self._extract_username(a) for a in source_issue.assignees) if u
             ]
@@ -570,11 +593,9 @@ class SyncService:
 
         # Ensure milestone exists
         milestone_id = None
-        if hasattr(source_issue, 'milestone') and source_issue.milestone:
+        if hasattr(source_issue, "milestone") and source_issue.milestone:
             milestone_title = self._extract_milestone_title(source_issue.milestone)
-            milestone_id = self._ensure_milestone(
-                target_client, target_project_id, milestone_title
-            )
+            milestone_id = self._ensure_milestone(target_client, target_project_id, milestone_title)
 
         # Prepare issue data
         synced_description = self._add_sync_reference(
@@ -600,7 +621,7 @@ class SyncService:
         if milestone_id:
             issue_data["milestone_id"] = milestone_id
 
-        if hasattr(source_issue, 'due_date') and source_issue.due_date:
+        if hasattr(source_issue, "due_date") and source_issue.due_date:
             issue_data["due_date"] = source_issue.due_date
 
         # Optional fields
@@ -622,14 +643,22 @@ class SyncService:
         estimate_seconds = _time_estimate_seconds(source_issue)
         if estimate_seconds:
             try:
-                target_client.set_issue_time_estimate(target_project_id, target_issue.iid, estimate_seconds)
+                target_client.set_issue_time_estimate(
+                    target_project_id, target_issue.iid, estimate_seconds
+                )
             except Exception as e:
                 logger.warning(f"Failed to set time estimate on issue #{target_issue.iid}: {e}")
 
         # Sync comments
         self._sync_comments(
-            source_issue, target_issue, source_instance,
-            target_client, target_project_id, target_instance_id, source_project_id, stats=stats
+            source_issue,
+            target_issue,
+            source_instance,
+            target_client,
+            target_project_id,
+            target_instance_id,
+            source_project_id,
+            stats=stats,
         )
 
         # Epic link (best-effort, title-mapped)
@@ -639,13 +668,17 @@ class SyncService:
             group_id = self._get_cached_group_id(target_client, target_project_id)
             if epic_iid and group_id and getattr(target_issue, "id", None):
                 try:
-                    target_client.add_issue_to_epic(group_id, epic_iid, issue_id=int(target_issue.id))
+                    target_client.add_issue_to_epic(
+                        group_id, epic_iid, issue_id=int(target_issue.id)
+                    )
                 except Exception as e:
                     logger.warning(f"Failed to link epic on created issue #{target_issue.iid}: {e}")
 
         # Close issue if source is closed
         if source_issue.state == "closed":
-            target_client.update_issue(target_project_id, target_issue.iid, {"state_event": "close"})
+            target_client.update_issue(
+                target_project_id, target_issue.iid, {"state_event": "close"}
+            )
 
         return target_issue
 
@@ -664,7 +697,9 @@ class SyncService:
         try:
             source_client = self._get_client(source_instance.id)
             # Prefer explicit project id/path; fall back to issue.project_id if present.
-            source_pid = source_project_id or (str(source_issue.project_id) if hasattr(source_issue, "project_id") else None)
+            source_pid = source_project_id or (
+                str(source_issue.project_id) if hasattr(source_issue, "project_id") else None
+            )
             if not source_pid:
                 raise ValueError("Missing source project id for comment sync")
             try:
@@ -677,7 +712,9 @@ class SyncService:
                     )
                     if stats is not None:
                         stats["skipped_inaccessible"] = stats.get("skipped_inaccessible", 0) + 1
-                        stats["skipped_notes_inaccessible"] = stats.get("skipped_notes_inaccessible", 0) + 1
+                        stats["skipped_notes_inaccessible"] = (
+                            stats.get("skipped_notes_inaccessible", 0) + 1
+                        )
                     return
                 raise
 
@@ -693,7 +730,9 @@ class SyncService:
                     )
                     if stats is not None:
                         stats["skipped_inaccessible"] = stats.get("skipped_inaccessible", 0) + 1
-                        stats["skipped_notes_inaccessible"] = stats.get("skipped_notes_inaccessible", 0) + 1
+                        stats["skipped_notes_inaccessible"] = (
+                            stats.get("skipped_notes_inaccessible", 0) + 1
+                        )
                     return
                 raise
             existing_note_markers: set[tuple[str, str, int, int]] = set()
@@ -750,7 +789,9 @@ class SyncService:
         except Exception as e:
             logger.error(f"Failed to sync comments: {e}")
 
-    def _find_synced_issue_by_pair(self, project_pair_id: int, source_iid: int, target_iid: int) -> Optional[SyncedIssue]:
+    def _find_synced_issue_by_pair(
+        self, project_pair_id: int, source_iid: int, target_iid: int
+    ) -> Optional[SyncedIssue]:
         return (
             self.db.query(SyncedIssue)
             .filter(
@@ -761,7 +802,9 @@ class SyncService:
             .first()
         )
 
-    def _find_synced_issue_by_either_side(self, project_pair_id: int, source_iid: int, target_iid: int) -> Optional[SyncedIssue]:
+    def _find_synced_issue_by_either_side(
+        self, project_pair_id: int, source_iid: int, target_iid: int
+    ) -> Optional[SyncedIssue]:
         # Best-effort de-duplication. (We avoid SQLAlchemy `or_` to keep this simple for now.)
         existing = (
             self.db.query(SyncedIssue)
@@ -853,7 +896,10 @@ class SyncService:
             payload: Dict[str, Any],
         ):
             # Only apply when the marker actually includes any relationship fields.
-            if not any(k in payload for k in ("issue_type", "milestone_title", "iteration_title", "epic_title")):
+            if not any(
+                k in payload
+                for k in ("issue_type", "milestone_title", "iteration_title", "epic_title")
+            ):
                 stats["relationships_skipped"] += 1
                 return
 
@@ -872,7 +918,9 @@ class SyncService:
             # milestone
             if payload.get("milestone_title") and not getattr(issue_obj, "milestone", None):
                 try:
-                    ms_id = self._ensure_milestone(client, project_id, str(payload["milestone_title"]))
+                    ms_id = self._ensure_milestone(
+                        client, project_id, str(payload["milestone_title"])
+                    )
                     if ms_id:
                         patch_data["milestone_id"] = ms_id
                 except Exception:
@@ -902,7 +950,9 @@ class SyncService:
             # epic link
             if payload.get("epic_title") and not getattr(issue_obj, "epic", None) and issue_id:
                 try:
-                    epic_iid = self._map_epic_iid(client, project_id, {"title": payload.get("epic_title")})
+                    epic_iid = self._map_epic_iid(
+                        client, project_id, {"title": payload.get("epic_title")}
+                    )
                     group_id = self._get_cached_group_id(client, project_id)
                     if epic_iid and group_id:
                         client.add_issue_to_epic(group_id, epic_iid, issue_id=int(issue_id))
@@ -998,6 +1048,7 @@ class SyncService:
         stats: Optional[Dict[str, int]] = None,
     ):
         """Update existing target issue from source"""
+
         def _time_estimate_seconds(obj: Any) -> Optional[int]:
             ts = getattr(obj, "time_stats", None)
             if ts is None:
@@ -1016,7 +1067,7 @@ class SyncService:
         # Map assignees
         # Always set assignee_ids so removals on source clear target.
         assignee_ids: List[int] = []
-        if hasattr(source_issue, 'assignees') and source_issue.assignees:
+        if hasattr(source_issue, "assignees") and source_issue.assignees:
             assignee_usernames = [
                 u for u in (self._extract_username(a) for a in source_issue.assignees) if u
             ]
@@ -1034,11 +1085,9 @@ class SyncService:
 
         # Ensure milestone exists
         milestone_id = None
-        if hasattr(source_issue, 'milestone') and source_issue.milestone:
+        if hasattr(source_issue, "milestone") and source_issue.milestone:
             milestone_title = self._extract_milestone_title(source_issue.milestone)
-            milestone_id = self._ensure_milestone(
-                target_client, target_project_id, milestone_title
-            )
+            milestone_id = self._ensure_milestone(target_client, target_project_id, milestone_title)
 
         # Prepare update data
         synced_description = self._add_sync_reference(
@@ -1084,7 +1133,9 @@ class SyncService:
         estimate_seconds = _time_estimate_seconds(source_issue)
         try:
             if estimate_seconds:
-                target_client.set_issue_time_estimate(target_project_id, target_issue_iid, estimate_seconds)
+                target_client.set_issue_time_estimate(
+                    target_project_id, target_issue_iid, estimate_seconds
+                )
             else:
                 target_client.reset_issue_time_estimate(target_project_id, target_issue_iid)
         except Exception as e:
@@ -1092,8 +1143,14 @@ class SyncService:
 
         # Sync new comments
         self._sync_comments(
-            source_issue, target_issue, source_instance,
-            target_client, target_project_id, target_instance_id, source_project_id, stats=stats
+            source_issue,
+            target_issue,
+            source_instance,
+            target_client,
+            target_project_id,
+            target_instance_id,
+            source_project_id,
+            stats=stats,
         )
 
         # Epic link (best-effort, title-mapped)
@@ -1103,7 +1160,9 @@ class SyncService:
             group_id = self._get_cached_group_id(target_client, target_project_id)
             if epic_iid and group_id and getattr(target_issue, "id", None):
                 try:
-                    target_client.add_issue_to_epic(group_id, epic_iid, issue_id=int(target_issue.id))
+                    target_client.add_issue_to_epic(
+                        group_id, epic_iid, issue_id=int(target_issue.id)
+                    )
                 except Exception as e:
                     logger.warning(f"Failed to link epic on updated issue #{target_issue_iid}: {e}")
 
@@ -1162,16 +1221,22 @@ class SyncService:
                 if conflict_type == "concurrent_update"
                 else f"Conflict detected: {conflict_type}"
             ),
-            source_data=json.dumps({
-                "title": source_issue.title,
-                "state": source_issue.state,
-                "updated_at": source_issue.updated_at,
-            }),
-            target_data=json.dumps({
-                "title": target_issue.title,
-                "state": target_issue.state,
-                "updated_at": target_issue.updated_at,
-            }) if target_issue else None,
+            source_data=json.dumps(
+                {
+                    "title": source_issue.title,
+                    "state": source_issue.state,
+                    "updated_at": source_issue.updated_at,
+                }
+            ),
+            target_data=json.dumps(
+                {
+                    "title": target_issue.title,
+                    "state": target_issue.state,
+                    "updated_at": target_issue.updated_at,
+                }
+            )
+            if target_issue
+            else None,
         )
         try:
             self.db.add(conflict)
@@ -1181,9 +1246,7 @@ class SyncService:
             logger.error(f"Failed to persist conflict log ({conflict_type}): {e}")
             return
 
-        logger.warning(
-            f"Conflict detected: {conflict_type} for source issue #{source_issue.iid}"
-        )
+        logger.warning(f"Conflict detected: {conflict_type} for source issue #{source_issue.iid}")
 
     def _log_sync(
         self,
@@ -1219,9 +1282,7 @@ class SyncService:
 
     def sync_project_pair(self, project_pair_id: int) -> Dict[str, Any]:
         """Sync issues for a project pair"""
-        project_pair = self.db.query(ProjectPair).filter(
-            ProjectPair.id == project_pair_id
-        ).first()
+        project_pair = self.db.query(ProjectPair).filter(ProjectPair.id == project_pair_id).first()
 
         if not project_pair:
             raise ValueError(f"Project pair {project_pair_id} not found")
@@ -1250,7 +1311,9 @@ class SyncService:
             # Add a small overlap to reduce risk of missing updates due to clock skew.
             updated_after = None
             if project_pair.last_sync_at is not None:
-                updated_after = self._normalize_utc_naive(project_pair.last_sync_at) - timedelta(minutes=2)
+                updated_after = self._normalize_utc_naive(project_pair.last_sync_at) - timedelta(
+                    minutes=2
+                )
 
             # Sync from source to target
             stats_s2t = self._sync_direction(
@@ -1288,21 +1351,13 @@ class SyncService:
             self.db.commit()
 
             logger.info(f"Sync completed for {project_pair.name}: {stats}")
-            self._log_sync(
-                project_pair,
-                SyncStatus.SUCCESS,
-                message=f"Sync completed: {stats}"
-            )
+            self._log_sync(project_pair, SyncStatus.SUCCESS, message=f"Sync completed: {stats}")
 
             return {"status": "success", "stats": stats}
 
         except Exception as e:
             logger.error(f"Sync failed for {project_pair.name}: {e}")
-            self._log_sync(
-                project_pair,
-                SyncStatus.FAILED,
-                message=f"Sync failed: {str(e)}"
-            )
+            self._log_sync(project_pair, SyncStatus.FAILED, message=f"Sync failed: {str(e)}")
             stats["errors"] += 1
             return {"status": "failed", "error": str(e), "stats": stats}
 
@@ -1337,21 +1392,34 @@ class SyncService:
                 try:
                     # Find existing sync record
                     if direction == SyncDirection.SOURCE_TO_TARGET:
-                        synced_issue = self.db.query(SyncedIssue).filter(
-                            SyncedIssue.project_pair_id == project_pair.id,
-                            SyncedIssue.source_issue_iid == source_issue.iid,
-                        ).first()
+                        synced_issue = (
+                            self.db.query(SyncedIssue)
+                            .filter(
+                                SyncedIssue.project_pair_id == project_pair.id,
+                                SyncedIssue.source_issue_iid == source_issue.iid,
+                            )
+                            .first()
+                        )
                     else:
-                        synced_issue = self.db.query(SyncedIssue).filter(
-                            SyncedIssue.project_pair_id == project_pair.id,
-                            SyncedIssue.target_issue_iid == source_issue.iid,
-                        ).first()
+                        synced_issue = (
+                            self.db.query(SyncedIssue)
+                            .filter(
+                                SyncedIssue.project_pair_id == project_pair.id,
+                                SyncedIssue.target_issue_iid == source_issue.iid,
+                            )
+                            .first()
+                        )
 
                     if synced_issue:
                         # Issue already synced, check for updates
-                        target_issue_iid = (synced_issue.target_issue_iid if direction == SyncDirection.SOURCE_TO_TARGET
-                                           else synced_issue.source_issue_iid)
-                        target_issue, rc = target_client.get_issue_optional(target_project_id, target_issue_iid)
+                        target_issue_iid = (
+                            synced_issue.target_issue_iid
+                            if direction == SyncDirection.SOURCE_TO_TARGET
+                            else synced_issue.source_issue_iid
+                        )
+                        target_issue, rc = target_client.get_issue_optional(
+                            target_project_id, target_issue_iid
+                        )
                         if target_issue is None:
                             # Distinguish "deleted" from "inaccessible" so we don't create duplicates on 403.
                             if rc in (401, 403):
@@ -1371,8 +1439,13 @@ class SyncService:
                             if rc == 404:
                                 # Target-side issue was deleted; recreate it and repair mapping.
                                 recreated = self._create_issue_from_source(
-                                    source_issue, source_instance, target_client,
-                                    target_project_id, target_instance.id, source_project_id, stats=stats
+                                    source_issue,
+                                    source_instance,
+                                    target_client,
+                                    target_project_id,
+                                    target_instance.id,
+                                    source_project_id,
+                                    stats=stats,
                                 )
                                 if direction == SyncDirection.SOURCE_TO_TARGET:
                                     synced_issue.target_issue_iid = recreated.iid
@@ -1389,13 +1462,18 @@ class SyncService:
                                 self.db.commit()
                                 stats["updated"] += 1
                                 continue
-                            raise RuntimeError(f"Failed to fetch target issue {target_issue_iid} (HTTP {rc})")
+                            raise RuntimeError(
+                                f"Failed to fetch target issue {target_issue_iid} (HTTP {rc})"
+                            )
 
                         # Detect conflicts
                         if self._detect_conflict(synced_issue, source_issue, target_issue):
                             self._log_conflict(
-                                project_pair, synced_issue, source_issue, target_issue,
-                                "concurrent_update"
+                                project_pair,
+                                synced_issue,
+                                source_issue,
+                                target_issue,
+                                "concurrent_update",
                             )
                             stats["conflicts"] += 1
                             continue
@@ -1409,11 +1487,19 @@ class SyncService:
                             source_project_id=source_project_id,
                         )
 
-                        if synced_issue.sync_hash != source_hash and (last_synced_at is None or source_updated > last_synced_at):
+                        if synced_issue.sync_hash != source_hash and (
+                            last_synced_at is None or source_updated > last_synced_at
+                        ):
                             # Update target issue
                             self._update_issue_from_source(
-                                source_issue, target_issue_iid, source_instance,
-                                target_client, target_project_id, target_instance.id, source_project_id, stats=stats
+                                source_issue,
+                                target_issue_iid,
+                                source_instance,
+                                target_client,
+                                target_project_id,
+                                target_instance.id,
+                                source_project_id,
+                                stats=stats,
                             )
                             synced_issue.last_synced_at = self._utcnow()
                             synced_issue.sync_hash = source_hash
@@ -1422,8 +1508,14 @@ class SyncService:
                         elif last_synced_at is None or source_updated > last_synced_at:
                             # Likely comment-only or system updates; keep issue content but still sync comments.
                             self._sync_comments(
-                                source_issue, target_issue, source_instance,
-                                target_client, target_project_id, target_instance.id, source_project_id, stats=stats
+                                source_issue,
+                                target_issue,
+                                source_instance,
+                                target_client,
+                                target_project_id,
+                                target_instance.id,
+                                source_project_id,
+                                stats=stats,
                             )
                             synced_issue.last_synced_at = self._utcnow()
                             self.db.commit()
@@ -1437,7 +1529,9 @@ class SyncService:
                         if ref is not None:
                             ref_url, ref_iid = ref
                             if self._normalize_instance_url(target_instance.url) == ref_url:
-                                other_issue, rc = target_client.get_issue_optional(target_project_id, ref_iid)
+                                other_issue, rc = target_client.get_issue_optional(
+                                    target_project_id, ref_iid
+                                )
                                 if other_issue is not None:
                                     source_hash = self._compute_synced_hash(
                                         source_issue,
@@ -1489,8 +1583,13 @@ class SyncService:
 
                         # New issue, create in target
                         target_issue = self._create_issue_from_source(
-                            source_issue, source_instance, target_client,
-                            target_project_id, target_instance.id, source_project_id, stats=stats
+                            source_issue,
+                            source_instance,
+                            target_client,
+                            target_project_id,
+                            target_instance.id,
+                            source_project_id,
+                            stats=stats,
                         )
 
                         # Create sync record
@@ -1536,9 +1635,11 @@ class SyncService:
                     logger.error(f"Failed to sync issue #{source_issue.iid}: {e}")
                     stats["errors"] += 1
                     self._log_sync(
-                        project_pair, SyncStatus.FAILED, direction,
+                        project_pair,
+                        SyncStatus.FAILED,
+                        direction,
                         f"Failed to sync issue: {str(e)}",
-                        source_iid=source_issue.iid
+                        source_iid=source_issue.iid,
                     )
 
         except Exception as e:

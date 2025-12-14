@@ -1,12 +1,14 @@
 """User mapping management endpoints"""
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
-from typing import List
-from pydantic import BaseModel
-from datetime import datetime
 
-from app.models.base import get_db
+from datetime import datetime
+from typing import List
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
 from app.models import UserMapping
+from app.models.base import get_db
 
 router = APIRouter(prefix="/api/user-mappings", tags=["user-mappings"])
 
@@ -42,11 +44,15 @@ def list_user_mappings(db: Session = Depends(get_db)):
 def create_user_mapping(mapping: UserMappingCreate, db: Session = Depends(get_db)):
     """Create a new user mapping"""
     # Check if mapping already exists
-    existing = db.query(UserMapping).filter(
-        UserMapping.source_instance_id == mapping.source_instance_id,
-        UserMapping.source_username == mapping.source_username,
-        UserMapping.target_instance_id == mapping.target_instance_id,
-    ).first()
+    existing = (
+        db.query(UserMapping)
+        .filter(
+            UserMapping.source_instance_id == mapping.source_instance_id,
+            UserMapping.source_username == mapping.source_username,
+            UserMapping.target_instance_id == mapping.target_instance_id,
+        )
+        .first()
+    )
     if existing:
         raise HTTPException(status_code=400, detail="User mapping already exists")
 

@@ -1,13 +1,17 @@
 """Sync log model"""
-from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, Text, Enum
-from sqlalchemy.orm import relationship
-from datetime import datetime
+
 import enum
+from datetime import datetime
+
+from sqlalchemy import Column, DateTime, Enum, ForeignKey, Integer, Text
+from sqlalchemy.orm import relationship
+
 from app.models.base import Base
 
 
 class SyncStatus(str, enum.Enum):
     """Sync status enumeration"""
+
     SUCCESS = "success"
     FAILED = "failed"
     CONFLICT = "conflict"
@@ -16,6 +20,7 @@ class SyncStatus(str, enum.Enum):
 
 class SyncDirection(str, enum.Enum):
     """Sync direction enumeration"""
+
     SOURCE_TO_TARGET = "source_to_target"
     TARGET_TO_SOURCE = "target_to_source"
 
