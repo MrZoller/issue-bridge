@@ -99,7 +99,7 @@ class SyncServiceBehaviorTests(unittest.TestCase):
         self.assertIn("assignee_ids", payload)
         self.assertEqual(payload["assignee_ids"], [])
         self.assertIn("milestone_id", payload)
-        self.assertIsNone(payload["milestone_id"])
+        self.assertEqual(payload["milestone_id"], 0)
         self.assertIn("due_date", payload)
         self.assertIsNone(payload["due_date"])
 
@@ -137,8 +137,9 @@ class SyncServiceBehaviorTests(unittest.TestCase):
         )
 
         class _SourceClient:
-            def get_issues(self, project_id):
+            def get_issues(self, project_id, updated_after=None):
                 self.project_id = project_id
+                self.updated_after = updated_after
                 return [source_issue]
 
         class _TargetClient:
@@ -187,7 +188,7 @@ class SyncServiceBehaviorTests(unittest.TestCase):
         )
 
         class _SourceClient:
-            def get_issues(self, project_id):
+            def get_issues(self, project_id, updated_after=None):
                 return [source_issue]
 
         class _TargetClient:

@@ -2,8 +2,9 @@
 import logging
 import hashlib
 import json
+import re
 from typing import Dict, Any, Optional, List, Tuple
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from sqlalchemy.orm import Session
 
 from app.models import (
@@ -46,6 +47,28 @@ class SyncService:
         """Parse GitLab ISO8601 timestamps into UTC tz-naive datetimes."""
         dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
         return cls._normalize_utc_naive(dt)
+
+    _SYNC_REF_RE = re.compile(
+        r"\*Synced from:\s*(?P<url>https?://[^\s*]+?)/-?/issues/(?P<iid>\d+)\*",
+        re.IGNORECASE,
+    )
+
+    @staticmethod
+    def _normalize_instance_url(url: str) -> str:
+        return (url or "").rstrip("/")
+
+    @classmethod
+    def _parse_sync_reference(cls, description: Optional[str]) -> Optional[Tuple[str, int]]:
+        """Parse our sync reference note to detect mirrored issues."""
+        if not description:
+            return None
+        m = cls._SYNC_REF_RE.search(description)
+        if not m:
+            return None
+        try:
+            return cls._normalize_instance_url(m.group("url")), int(m.group("iid"))
+        except Exception:
+            return None
 
     @staticmethod
     def _safe_attr(obj: Any, name: str, default: Any = None) -> Any:
@@ -128,18 +151,36 @@ class SyncService:
 
     def _compute_issue_hash(self, issue: Any) -> str:
         """Compute hash of issue content for change detection"""
+        assignees = []
+        try:
+            for a in getattr(issue, "assignees", []) or []:
+                u = self._extract_username(a)
+                if u:
+                    assignees.append(u)
+        except Exception:
+            assignees = []
+
+        milestone_title = None
+        try:
+            milestone_title = self._extract_milestone_title(getattr(issue, "milestone", None))
+        except Exception:
+            milestone_title = None
+
         data = {
             "title": issue.title,
             "description": issue.description or "",
             "state": issue.state,
-            "labels": sorted(issue.labels),
-            "updated_at": issue.updated_at,
+            "labels": sorted(issue.labels or []),
+            "assignees": sorted(assignees),
+            "due_date": getattr(issue, "due_date", None),
+            "milestone": milestone_title,
         }
         return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
 
     def _add_sync_reference(self, description: str, instance_url: str, issue_iid: int) -> str:
         """Add sync reference to issue description"""
-        sync_note = f"\n\n---\n*Synced from: {instance_url}/-/issues/{issue_iid}*"
+        base = self._normalize_instance_url(instance_url)
+        sync_note = f"\n\n---\n*Synced from: {base}/-/issues/{issue_iid}*"
         if sync_note not in (description or ""):
             return (description or "") + sync_note
         return description or ""
@@ -305,7 +346,8 @@ class SyncService:
         }
 
         # Always set milestone_id/due_date so removals clear target.
-        update_data["milestone_id"] = milestone_id
+        # GitLab often uses milestone_id=0 to clear; treat None as "clear".
+        update_data["milestone_id"] = milestone_id if milestone_id is not None else 0
         update_data["due_date"] = getattr(source_issue, "due_date", None)
 
         # Handle state changes
@@ -332,10 +374,22 @@ class SyncService:
 
         # If both were updated after last sync, we have a conflict
         if last_synced_at:
-            return (
-                source_updated > last_synced_at
-                and target_updated > last_synced_at
-            )
+            if not (source_updated > last_synced_at and target_updated > last_synced_at):
+                return False
+
+            # Reduce false positives: updated_at can change due to comments/system notes.
+            # If either side's *content* still matches the last synced baseline hash, don't treat it as conflict.
+            baseline = getattr(synced_issue, "sync_hash", None)
+            if baseline:
+                try:
+                    if self._compute_issue_hash(source_issue) == baseline:
+                        return False
+                    if self._compute_issue_hash(target_issue) == baseline:
+                        return False
+                except Exception:
+                    # If hashing fails for any reason, fall back to timestamp-based behavior.
+                    pass
+            return True
         return False
 
     def _log_conflict(
@@ -436,6 +490,12 @@ class SyncService:
         }
 
         try:
+            # Use incremental sync after the first successful run.
+            # Add a small overlap to reduce risk of missing updates due to clock skew.
+            updated_after = None
+            if project_pair.last_sync_at is not None:
+                updated_after = self._normalize_utc_naive(project_pair.last_sync_at) - timedelta(minutes=2)
+
             # Sync from source to target
             stats_s2t = self._sync_direction(
                 project_pair,
@@ -446,6 +506,7 @@ class SyncService:
                 project_pair.source_instance,
                 project_pair.target_instance,
                 SyncDirection.SOURCE_TO_TARGET,
+                updated_after=updated_after,
             )
             for key in stats:
                 stats[key] += stats_s2t[key]
@@ -461,6 +522,7 @@ class SyncService:
                     project_pair.target_instance,
                     project_pair.source_instance,
                     SyncDirection.TARGET_TO_SOURCE,
+                    updated_after=updated_after,
                 )
                 for key in stats:
                     stats[key] += stats_t2s[key]
@@ -498,6 +560,7 @@ class SyncService:
         source_instance: GitLabInstance,
         target_instance: GitLabInstance,
         direction: SyncDirection,
+        updated_after: Optional[datetime] = None,
     ) -> Dict[str, int]:
         """Sync issues in one direction"""
         stats = {
@@ -510,7 +573,7 @@ class SyncService:
 
         try:
             # Get all issues from source
-            source_issues = source_client.get_issues(source_project_id)
+            source_issues = source_client.get_issues(source_project_id, updated_after=updated_after)
 
             for source_issue in source_issues:
                 try:
@@ -562,19 +625,66 @@ class SyncService:
                         # Check if source was updated since last sync
                         source_updated = self._parse_gitlab_datetime(source_issue.updated_at)
                         last_synced_at = self._normalize_utc_naive(synced_issue.last_synced_at)
-                        if last_synced_at is None or source_updated > last_synced_at:
+                        source_hash = self._compute_issue_hash(source_issue)
+
+                        if synced_issue.sync_hash != source_hash and (last_synced_at is None or source_updated > last_synced_at):
                             # Update target issue
                             self._update_issue_from_source(
                                 source_issue, target_issue_iid, source_instance,
                                 target_client, target_project_id, target_instance.id, source_project_id
                             )
                             synced_issue.last_synced_at = self._utcnow()
-                            synced_issue.sync_hash = self._compute_issue_hash(source_issue)
+                            synced_issue.sync_hash = source_hash
+                            self.db.commit()
+                            stats["updated"] += 1
+                        elif last_synced_at is None or source_updated > last_synced_at:
+                            # Likely comment-only or system updates; keep issue content but still sync comments.
+                            self._sync_comments(
+                                source_issue, target_issue, source_instance,
+                                target_client, target_project_id, target_instance.id, source_project_id
+                            )
+                            synced_issue.last_synced_at = self._utcnow()
                             self.db.commit()
                             stats["updated"] += 1
                         else:
                             stats["skipped"] += 1
                     else:
+                        # If this issue looks like it was previously synced from the other side (based on our
+                        # embedded reference), avoid creating duplicates and instead rebuild the mapping.
+                        ref = self._parse_sync_reference(getattr(source_issue, "description", None))
+                        if ref is not None:
+                            ref_url, ref_iid = ref
+                            if self._normalize_instance_url(target_instance.url) == ref_url:
+                                other_issue = target_client.get_issue_or_none(target_project_id, ref_iid)
+                                if other_issue is not None:
+                                    source_hash = self._compute_issue_hash(source_issue)
+                                    if direction == SyncDirection.SOURCE_TO_TARGET:
+                                        rebuilt = SyncedIssue(
+                                            project_pair_id=project_pair.id,
+                                            source_issue_iid=source_issue.iid,
+                                            source_issue_id=source_issue.id,
+                                            target_issue_iid=other_issue.iid,
+                                            target_issue_id=other_issue.id,
+                                            sync_hash=source_hash,
+                                            last_synced_at=self._utcnow(),
+                                        )
+                                    else:
+                                        # Direction is TARGET_TO_SOURCE; the "other issue" lives on the real source side.
+                                        rebuilt = SyncedIssue(
+                                            project_pair_id=project_pair.id,
+                                            source_issue_iid=other_issue.iid,
+                                            source_issue_id=other_issue.id,
+                                            target_issue_iid=source_issue.iid,
+                                            target_issue_id=source_issue.id,
+                                            sync_hash=source_hash,
+                                            last_synced_at=self._utcnow(),
+                                        )
+
+                                    self.db.add(rebuilt)
+                                    self.db.commit()
+                                    stats["created"] += 1
+                                    continue
+
                         # New issue, create in target
                         target_issue = self._create_issue_from_source(
                             source_issue, source_instance, target_client,
@@ -583,22 +693,24 @@ class SyncService:
 
                         # Create sync record
                         if direction == SyncDirection.SOURCE_TO_TARGET:
+                            source_hash = self._compute_issue_hash(source_issue)
                             synced_issue = SyncedIssue(
                                 project_pair_id=project_pair.id,
                                 source_issue_iid=source_issue.iid,
                                 source_issue_id=source_issue.id,
                                 target_issue_iid=target_issue.iid,
                                 target_issue_id=target_issue.id,
-                                sync_hash=self._compute_issue_hash(source_issue),
+                                sync_hash=source_hash,
                             )
                         else:
+                            source_hash = self._compute_issue_hash(source_issue)
                             synced_issue = SyncedIssue(
                                 project_pair_id=project_pair.id,
                                 source_issue_iid=target_issue.iid,
                                 source_issue_id=target_issue.id,
                                 target_issue_iid=source_issue.iid,
                                 target_issue_id=source_issue.id,
-                                sync_hash=self._compute_issue_hash(source_issue),
+                                sync_hash=source_hash,
                             )
                         self.db.add(synced_issue)
                         self.db.commit()

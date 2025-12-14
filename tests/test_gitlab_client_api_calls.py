@@ -135,7 +135,7 @@ class GitLabClientApiCallTests(unittest.TestCase):
 
         self.assertIs(out, issue)
         self.assertEqual(issue.title, "New")
-        self.assertEqual(issue.labels, ["a"])
+        self.assertEqual(issue.labels, "a")
         issue.save.assert_called_once_with()
 
     def test_get_issue_notes_calls_notes_list(self):
@@ -154,7 +154,7 @@ class GitLabClientApiCallTests(unittest.TestCase):
 
         self.assertEqual(out, ["n"])
         project.issues.get.assert_called_once_with(5)
-        notes.list.assert_called_once_with(all=True, order_by="created_at", sort="asc")
+        notes.list.assert_called_once_with(get_all=True, per_page=100, order_by="created_at", sort="asc")
 
     def test_create_issue_note_calls_notes_create(self):
         from app.services.gitlab_client import GitLabClient
@@ -206,7 +206,7 @@ class GitLabClientApiCallTests(unittest.TestCase):
         out = client.get_project_labels("proj")
 
         self.assertEqual(out, ["l"])
-        project.labels.list.assert_called_once_with(all=True)
+        project.labels.list.assert_called_once_with(get_all=True, per_page=100)
 
     def test_create_label_returns_label_or_none_on_error(self):
         from app.services.gitlab_client import GitLabClient
@@ -233,7 +233,23 @@ class GitLabClientApiCallTests(unittest.TestCase):
         out = client.get_project_milestones("proj")
 
         self.assertEqual(out, ["m"])
-        project.milestones.list.assert_called_once_with(all=True)
+        project.milestones.list.assert_called_once_with(get_all=True, per_page=100)
+
+    def test_update_issue_normalizes_empty_labels_and_due_date(self):
+        from app.services.gitlab_client import GitLabClient
+
+        client = GitLabClient.__new__(GitLabClient)
+        issue = Mock()
+        issue.save = Mock()
+        project = Mock()
+        project.issues.get = Mock(return_value=issue)
+        client.get_project = Mock(return_value=project)
+
+        client.update_issue("proj", 9, {"labels": [], "due_date": None})
+
+        self.assertEqual(issue.labels, "")
+        self.assertEqual(issue.due_date, "")
+        issue.save.assert_called_once_with()
 
     def test_create_milestone_returns_milestone_or_none_on_error(self):
         from app.services.gitlab_client import GitLabClient
