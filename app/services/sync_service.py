@@ -327,6 +327,7 @@ class SyncService:
         target_project_id: str,
         target_instance_id: int,
         source_project_id: str,
+        stats: Optional[Dict[str, int]] = None,
     ) -> Any:
         """Create a new issue in target from source issue"""
         # Map assignees
@@ -380,7 +381,7 @@ class SyncService:
         # Sync comments
         self._sync_comments(
             source_issue, target_issue, source_instance,
-            target_client, target_project_id, target_instance_id, source_project_id
+            target_client, target_project_id, target_instance_id, source_project_id, stats=stats
         )
 
         # Close issue if source is closed
@@ -398,6 +399,7 @@ class SyncService:
         target_project_id: str,
         target_instance_id: int,
         source_project_id: Optional[str] = None,
+        stats: Optional[Dict[str, int]] = None,
     ):
         """Sync comments from source to target issue"""
         try:
@@ -414,6 +416,9 @@ class SyncService:
                     logger.warning(
                         f"Skipping comment sync for source issue #{source_issue.iid} (notes inaccessible)"
                     )
+                    if stats is not None:
+                        stats["skipped_inaccessible"] = stats.get("skipped_inaccessible", 0) + 1
+                        stats["skipped_notes_inaccessible"] = stats.get("skipped_notes_inaccessible", 0) + 1
                     return
                 raise
 
@@ -427,6 +432,9 @@ class SyncService:
                     logger.warning(
                         f"Skipping comment sync for target issue #{target_issue.iid} (notes inaccessible)"
                     )
+                    if stats is not None:
+                        stats["skipped_inaccessible"] = stats.get("skipped_inaccessible", 0) + 1
+                        stats["skipped_notes_inaccessible"] = stats.get("skipped_notes_inaccessible", 0) + 1
                     return
                 raise
             existing_note_markers: set[tuple[str, str, int, int]] = set()
@@ -609,6 +617,7 @@ class SyncService:
         target_project_id: str,
         target_instance_id: int,
         source_project_id: str,
+        stats: Optional[Dict[str, int]] = None,
     ):
         """Update existing target issue from source"""
         # Map assignees
@@ -665,7 +674,7 @@ class SyncService:
         # Sync new comments
         self._sync_comments(
             source_issue, target_issue, source_instance,
-            target_client, target_project_id, target_instance_id, source_project_id
+            target_client, target_project_id, target_instance_id, source_project_id, stats=stats
         )
 
     def _detect_conflict(
@@ -791,6 +800,7 @@ class SyncService:
             "conflicts": 0,
             "skipped": 0,
             "skipped_inaccessible": 0,
+            "skipped_notes_inaccessible": 0,
             "errors": 0,
         }
 
@@ -874,6 +884,7 @@ class SyncService:
             "conflicts": 0,
             "skipped": 0,
             "skipped_inaccessible": 0,
+            "skipped_notes_inaccessible": 0,
             "errors": 0,
         }
 
@@ -920,7 +931,7 @@ class SyncService:
                                 # Target-side issue was deleted; recreate it and repair mapping.
                                 recreated = self._create_issue_from_source(
                                     source_issue, source_instance, target_client,
-                                    target_project_id, target_instance.id, source_project_id
+                                    target_project_id, target_instance.id, source_project_id, stats=stats
                                 )
                                 if direction == SyncDirection.SOURCE_TO_TARGET:
                                     synced_issue.target_issue_iid = recreated.iid
@@ -961,7 +972,7 @@ class SyncService:
                             # Update target issue
                             self._update_issue_from_source(
                                 source_issue, target_issue_iid, source_instance,
-                                target_client, target_project_id, target_instance.id, source_project_id
+                                target_client, target_project_id, target_instance.id, source_project_id, stats=stats
                             )
                             synced_issue.last_synced_at = self._utcnow()
                             synced_issue.sync_hash = source_hash
@@ -971,7 +982,7 @@ class SyncService:
                             # Likely comment-only or system updates; keep issue content but still sync comments.
                             self._sync_comments(
                                 source_issue, target_issue, source_instance,
-                                target_client, target_project_id, target_instance.id, source_project_id
+                                target_client, target_project_id, target_instance.id, source_project_id, stats=stats
                             )
                             synced_issue.last_synced_at = self._utcnow()
                             self.db.commit()
@@ -1033,7 +1044,7 @@ class SyncService:
                         # New issue, create in target
                         target_issue = self._create_issue_from_source(
                             source_issue, source_instance, target_client,
-                            target_project_id, target_instance.id, source_project_id
+                            target_project_id, target_instance.id, source_project_id, stats=stats
                         )
 
                         # Create sync record
