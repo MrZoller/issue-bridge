@@ -25,4 +25,6 @@ jobs:
 
       - name: Run unit tests
         run: |
+          # Keep CI output clean: these are dependency deprecations, not failures.
+          export PYTHONWARNINGS="ignore::DeprecationWarning,ignore::PendingDeprecationWarning"
           python -m unittest discover -s tests -p 'test_*.py'

@@ -1,6 +1,9 @@
 import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
+import logging
+
+logging.disable(logging.CRITICAL)
 
 
 class SyncServiceGitLabCallTests(unittest.TestCase):

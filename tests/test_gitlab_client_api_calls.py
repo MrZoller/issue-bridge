@@ -1,8 +1,11 @@
 import unittest
 from datetime import datetime, timezone
 from unittest.mock import Mock, patch
+import logging
 
 import gitlab
+
+logging.disable(logging.CRITICAL)
 
 
 class GitLabClientApiCallTests(unittest.TestCase):

@@ -1,6 +1,9 @@
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
+import logging
+
+logging.disable(logging.CRITICAL)
 
 
 class _FakeQuery:

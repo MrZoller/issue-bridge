@@ -2,6 +2,9 @@ import unittest
 from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import patch, Mock
+import logging
+
+logging.disable(logging.CRITICAL)
 
 
 class _FakeQuery:
