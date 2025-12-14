@@ -28,6 +28,7 @@ jobs:
           args: >-
             --from=gfm
             --resource-path=.
+            --lua-filter=scripts/pandoc/strip_svg_images.lua
             --toc
             -V geometry:margin=1in
             README.md
@@ -39,6 +40,7 @@ jobs:
           args: >-
             --from=gfm
             --resource-path=.
+            --lua-filter=scripts/pandoc/strip_svg_images.lua
             --toc
             -V geometry:margin=1in
             QUICKSTART.md
@@ -50,6 +52,7 @@ jobs:
           args: >-
             --from=gfm
             --resource-path=.
+            --lua-filter=scripts/pandoc/strip_svg_images.lua
             --toc
             -V geometry:margin=1in
             TESTING_GUIDE.md
@@ -61,6 +64,7 @@ jobs:
           args: >-
             --from=gfm
             --resource-path=.
+            --lua-filter=scripts/pandoc/strip_svg_images.lua
             --toc
             -V geometry:margin=1in
             CONTRIBUTING.md
@@ -72,6 +76,7 @@ jobs:
           args: >-
             --from=gfm
             --resource-path=.
+            --lua-filter=scripts/pandoc/strip_svg_images.lua
             --toc
             -V geometry:margin=1in
             SECURITY.md
