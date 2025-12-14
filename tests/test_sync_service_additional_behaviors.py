@@ -110,8 +110,8 @@ class SyncServiceAdditionalBehaviorTests(unittest.TestCase):
                 return [source_issue]
 
         class _TargetClient:
-            def get_issue_or_none(self, project_id, issue_iid):
-                return SimpleNamespace(iid=9, id=900, state="opened", updated_at="2025-01-01T00:00:00Z")
+            def get_issue_optional(self, project_id, issue_iid):
+                return SimpleNamespace(iid=9, id=900, state="opened", updated_at="2025-01-01T00:00:00Z"), None
 
         with patch.object(svc, "_compute_issue_hash", return_value="hash", autospec=True), \
              patch.object(svc, "_update_issue_from_source", autospec=True) as upd, \
@@ -160,10 +160,10 @@ class SyncServiceAdditionalBehaviorTests(unittest.TestCase):
                 return [mirrored]
 
         class _TargetClient:
-            def get_issue_or_none(self, project_id, issue_iid):
+            def get_issue_optional(self, project_id, issue_iid):
                 if issue_iid == 99:
-                    return SimpleNamespace(iid=99, id=9900)
-                return None
+                    return SimpleNamespace(iid=99, id=9900), None
+                return None, 404
 
         with patch.object(svc, "_compute_issue_hash", return_value="hash", autospec=True), \
              patch.object(svc, "_create_issue_from_source", autospec=True) as create_call:

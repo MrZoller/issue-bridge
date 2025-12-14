@@ -897,29 +897,45 @@ class SyncService:
                         # Issue already synced, check for updates
                         target_issue_iid = (synced_issue.target_issue_iid if direction == SyncDirection.SOURCE_TO_TARGET
                                            else synced_issue.source_issue_iid)
-                        target_issue = target_client.get_issue_or_none(target_project_id, target_issue_iid)
+                        target_issue, rc = target_client.get_issue_optional(target_project_id, target_issue_iid)
                         if target_issue is None:
-                            # Target-side issue was deleted or became inaccessible; recreate it and
-                            # repair the mapping so future syncs are consistent.
-                            recreated = self._create_issue_from_source(
-                                source_issue, source_instance, target_client,
-                                target_project_id, target_instance.id, source_project_id
-                            )
-                            if direction == SyncDirection.SOURCE_TO_TARGET:
-                                synced_issue.target_issue_iid = recreated.iid
-                                synced_issue.target_issue_id = recreated.id
-                            else:
-                                synced_issue.source_issue_iid = recreated.iid
-                                synced_issue.source_issue_id = recreated.id
-                            synced_issue.last_synced_at = self._utcnow()
-                            synced_issue.sync_hash = self._compute_synced_hash(
-                                source_issue,
-                                source_instance_url=source_instance.url,
-                                source_project_id=source_project_id,
-                            )
-                            self.db.commit()
-                            stats["updated"] += 1
-                            continue
+                            # Distinguish "deleted" from "inaccessible" so we don't create duplicates on 403.
+                            if rc in (401, 403):
+                                logger.warning(
+                                    f"Skipping issue #{source_issue.iid}: target issue #{target_issue_iid} inaccessible (HTTP {rc})"
+                                )
+                                stats["skipped"] += 1
+                                self._log_sync(
+                                    project_pair,
+                                    SyncStatus.SKIPPED,
+                                    direction,
+                                    f"Skipped: target issue inaccessible (HTTP {rc})",
+                                    source_iid=source_issue.iid,
+                                    target_iid=target_issue_iid,
+                                )
+                                continue
+                            if rc == 404:
+                                # Target-side issue was deleted; recreate it and repair mapping.
+                                recreated = self._create_issue_from_source(
+                                    source_issue, source_instance, target_client,
+                                    target_project_id, target_instance.id, source_project_id
+                                )
+                                if direction == SyncDirection.SOURCE_TO_TARGET:
+                                    synced_issue.target_issue_iid = recreated.iid
+                                    synced_issue.target_issue_id = recreated.id
+                                else:
+                                    synced_issue.source_issue_iid = recreated.iid
+                                    synced_issue.source_issue_id = recreated.id
+                                synced_issue.last_synced_at = self._utcnow()
+                                synced_issue.sync_hash = self._compute_synced_hash(
+                                    source_issue,
+                                    source_instance_url=source_instance.url,
+                                    source_project_id=source_project_id,
+                                )
+                                self.db.commit()
+                                stats["updated"] += 1
+                                continue
+                            raise RuntimeError(f"Failed to fetch target issue {target_issue_iid} (HTTP {rc})")
 
                         # Detect conflicts
                         if self._detect_conflict(synced_issue, source_issue, target_issue):
@@ -967,7 +983,7 @@ class SyncService:
                         if ref is not None:
                             ref_url, ref_iid = ref
                             if self._normalize_instance_url(target_instance.url) == ref_url:
-                                other_issue = target_client.get_issue_or_none(target_project_id, ref_iid)
+                                other_issue, rc = target_client.get_issue_optional(target_project_id, ref_iid)
                                 if other_issue is not None:
                                     source_hash = self._compute_issue_hash(source_issue)
                                     if direction == SyncDirection.SOURCE_TO_TARGET:
@@ -995,6 +1011,21 @@ class SyncService:
                                     self.db.add(rebuilt)
                                     self.db.commit()
                                     stats["created"] += 1
+                                    continue
+                                if rc in (401, 403):
+                                    # Don't create a duplicate if we can see it's a mirrored issue but can't access the pair.
+                                    logger.warning(
+                                        f"Skipping issue #{source_issue.iid}: mirrored target issue #{ref_iid} inaccessible (HTTP {rc})"
+                                    )
+                                    stats["skipped"] += 1
+                                    self._log_sync(
+                                        project_pair,
+                                        SyncStatus.SKIPPED,
+                                        direction,
+                                        f"Skipped: mirrored target issue inaccessible (HTTP {rc})",
+                                        source_iid=source_issue.iid,
+                                        target_iid=ref_iid,
+                                    )
                                     continue
 
                         # New issue, create in target

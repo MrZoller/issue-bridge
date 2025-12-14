@@ -143,13 +143,13 @@ class SyncServiceBehaviorTests(unittest.TestCase):
                 return [source_issue]
 
         class _TargetClient:
-            def get_issue_or_none(self, project_id, issue_iid):
-                return None
+            def get_issue_optional(self, project_id, issue_iid):
+                return None, 404
 
         recreated_issue = SimpleNamespace(iid=111, id=222)
 
         with patch.object(svc, "_create_issue_from_source", return_value=recreated_issue, autospec=True), \
-             patch.object(svc, "_compute_issue_hash", return_value="hash", autospec=True):
+             patch.object(svc, "_compute_synced_hash", return_value="hash", autospec=True):
             stats = svc._sync_direction(
                 project_pair=SimpleNamespace(id=1),
                 source_client=_SourceClient(),
@@ -165,6 +165,61 @@ class SyncServiceBehaviorTests(unittest.TestCase):
         self.assertEqual(synced_issue.target_issue_iid, 111)
         self.assertEqual(synced_issue.target_issue_id, 222)
         self.assertGreaterEqual(db.commits, 1)
+
+    def test_sync_direction_does_not_recreate_on_target_403(self):
+        from app.services.sync_service import SyncService
+        from app.models.sync_log import SyncDirection
+
+        synced_issue = SimpleNamespace(
+            id=123,
+            project_pair_id=1,
+            source_issue_iid=7,
+            source_issue_id=700,
+            target_issue_iid=9,
+            target_issue_id=900,
+            last_synced_at=None,
+            sync_hash=None,
+        )
+        db = _FakeSession(first_queue=[synced_issue])
+        svc = SyncService(db)
+
+        source_issue = SimpleNamespace(
+            iid=7,
+            id=700,
+            project_id="sproj",
+            title="A",
+            description="B",
+            labels=[],
+            assignees=[],
+            milestone=None,
+            due_date=None,
+            state="opened",
+            updated_at="2025-01-01T00:00:00Z",
+        )
+
+        class _SourceClient:
+            def get_issues(self, project_id, updated_after=None):
+                return [source_issue]
+
+        class _TargetClient:
+            def get_issue_optional(self, project_id, issue_iid):
+                return None, 403
+
+        with patch.object(svc, "_create_issue_from_source", autospec=True) as create_call, \
+             patch.object(svc, "_log_sync", autospec=True):
+            stats = svc._sync_direction(
+                project_pair=SimpleNamespace(id=1),
+                source_client=_SourceClient(),
+                target_client=_TargetClient(),
+                source_project_id="sproj",
+                target_project_id="tproj",
+                source_instance=SimpleNamespace(id=10, url="https://src"),
+                target_instance=SimpleNamespace(id=20, url="https://tgt"),
+                direction=SyncDirection.SOURCE_TO_TARGET,
+            )
+
+        create_call.assert_not_called()
+        self.assertEqual(stats["skipped"], 1)
 
     def test_sync_direction_rolls_back_on_issue_error(self):
         from app.services.sync_service import SyncService
