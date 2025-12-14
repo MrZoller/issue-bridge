@@ -1,5 +1,5 @@
 """Synced issue model"""
-from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, Text
+from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, UniqueConstraint
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 from app.models.base import Base
@@ -14,6 +14,10 @@ class SyncedIssue(Base):
     """Mapping of synced issues between instances"""
 
     __tablename__ = "synced_issues"
+    __table_args__ = (
+        UniqueConstraint("project_pair_id", "source_issue_iid", name="uq_synced_issues_pair_source_iid"),
+        UniqueConstraint("project_pair_id", "target_issue_iid", name="uq_synced_issues_pair_target_iid"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
 

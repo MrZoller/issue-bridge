@@ -73,12 +73,16 @@ class SyncServiceBehaviorTests(unittest.TestCase):
         class _TargetClient:
             def __init__(self):
                 self.update_calls = []
+                self.reset_calls = 0
 
             def get_issue(self, project_id, issue_iid):
                 return target_issue
 
             def update_issue(self, project_id, issue_iid, issue_data):
                 self.update_calls.append((project_id, issue_iid, issue_data))
+
+            def reset_issue_time_estimate(self, project_id, issue_iid):
+                self.reset_calls += 1
 
         target_client = _TargetClient()
 

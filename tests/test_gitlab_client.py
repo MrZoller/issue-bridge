@@ -37,6 +37,7 @@ class GitLabClientGetIssuesTests(unittest.TestCase):
         params = issues.calls[0]
         self.assertEqual(params["state"], "all")
         self.assertEqual(params["per_page"], 100)
+        self.assertTrue(params["with_time_stats"])
         self.assertEqual(params["order_by"], "updated_at")
         self.assertEqual(params["sort"], "desc")
         # python-gitlab uses get_all for pagination in many versions

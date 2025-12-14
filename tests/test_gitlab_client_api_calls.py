@@ -60,6 +60,7 @@ class GitLabClientApiCallTests(unittest.TestCase):
         self.assertTrue(kwargs["get_all"])
         self.assertEqual(kwargs["state"], "all")
         self.assertEqual(kwargs["per_page"], 100)
+        self.assertTrue(kwargs["with_time_stats"])
         self.assertEqual(kwargs["order_by"], "updated_at")
         self.assertEqual(kwargs["sort"], "desc")
         self.assertEqual(kwargs["updated_after"], updated_after.isoformat())
@@ -265,6 +266,28 @@ class GitLabClientApiCallTests(unittest.TestCase):
 
         project.milestones.create = Mock(side_effect=RuntimeError("fail"))
         self.assertIsNone(client.create_milestone("proj", {"title": "v2"}))
+
+    def test_set_and_reset_issue_time_estimate_calls_http_post(self):
+        from app.services.gitlab_client import GitLabClient
+
+        client = GitLabClient.__new__(GitLabClient)
+        client.gl = Mock()
+        client.gl.http_post = Mock(return_value={"ok": True})
+
+        out = client.set_issue_time_estimate("group/proj", 9, 120)
+        self.assertEqual(out, {"ok": True})
+        client.gl.http_post.assert_called_with(
+            "/projects/group%2Fproj/issues/9/time_estimate",
+            post_data={"duration": "120s"},
+        )
+
+        client.gl.http_post.reset_mock()
+        out2 = client.reset_issue_time_estimate("group/proj", 9)
+        self.assertEqual(out2, {"ok": True})
+        client.gl.http_post.assert_called_with(
+            "/projects/group%2Fproj/issues/9/reset_time_estimate",
+            post_data={},
+        )
 
 
 if __name__ == "__main__":

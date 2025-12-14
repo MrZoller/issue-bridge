@@ -4,6 +4,7 @@ import logging
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone
 import time
+from urllib.parse import quote
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +83,14 @@ class GitLabClient:
             # Important defaults:
             # - GitLab defaults to state=opened; we must include closed issues for correct syncing.
             # - Use get_all=True for proper pagination across python-gitlab versions.
-            params = {"order_by": "updated_at", "sort": "desc", "state": "all", "per_page": 100}
+            params = {
+                "order_by": "updated_at",
+                "sort": "desc",
+                "state": "all",
+                "per_page": 100,
+                # Needed for robust estimate syncing.
+                "with_time_stats": True,
+            }
             if updated_after:
                 # Our DB uses UTC tz-naive; assume UTC if tzinfo is missing.
                 if updated_after.tzinfo is None:
@@ -220,3 +228,16 @@ class GitLabClient:
         except Exception as e:
             logger.warning(f"Failed to create milestone: {e}")
             return None
+
+    def set_issue_time_estimate(self, project_id: str, issue_iid: int, seconds: int) -> Any:
+        """Set time estimate for an issue (seconds)."""
+        pid = quote(str(project_id), safe="")
+        duration = f"{int(seconds)}s"
+        path = f"/projects/{pid}/issues/{int(issue_iid)}/time_estimate"
+        return self._with_retries(lambda: self.gl.http_post(path, post_data={"duration": duration}))
+
+    def reset_issue_time_estimate(self, project_id: str, issue_iid: int) -> Any:
+        """Reset/clear time estimate for an issue."""
+        pid = quote(str(project_id), safe="")
+        path = f"/projects/{pid}/issues/{int(issue_iid)}/reset_time_estimate"
+        return self._with_retries(lambda: self.gl.http_post(path, post_data={}))

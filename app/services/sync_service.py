@@ -7,6 +7,7 @@ from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime, timezone, timedelta
 from types import SimpleNamespace
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 import gitlab
 
 from app.models import (
@@ -241,6 +242,21 @@ class SyncService:
 
     def _compute_issue_hash(self, issue: Any) -> str:
         """Compute hash of issue content for change detection"""
+        def _time_estimate_seconds(obj: Any) -> Optional[int]:
+            ts = getattr(obj, "time_stats", None)
+            if ts is None:
+                return None
+            if isinstance(ts, dict):
+                val = ts.get("time_estimate")
+            else:
+                val = getattr(ts, "time_estimate", None)
+            if val in (None, "", 0):
+                return None
+            try:
+                return int(val)
+            except Exception:
+                return None
+
         assignees = []
         try:
             for a in getattr(issue, "assignees", []) or []:
@@ -264,6 +280,8 @@ class SyncService:
             "assignees": sorted(assignees),
             "due_date": getattr(issue, "due_date", None),
             "milestone": milestone_title,
+            "weight": getattr(issue, "weight", None),
+            "time_estimate_seconds": _time_estimate_seconds(issue),
         }
         return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
 
@@ -315,6 +333,8 @@ class SyncService:
             assignees=getattr(source_issue, "assignees", []) or [],
             milestone=getattr(source_issue, "milestone", None),
             due_date=getattr(source_issue, "due_date", None),
+            weight=getattr(source_issue, "weight", None),
+            time_stats=getattr(source_issue, "time_stats", None),
             updated_at=getattr(source_issue, "updated_at", None),
         )
         return self._compute_issue_hash(proxy)
@@ -330,6 +350,21 @@ class SyncService:
         stats: Optional[Dict[str, int]] = None,
     ) -> Any:
         """Create a new issue in target from source issue"""
+        def _time_estimate_seconds(obj: Any) -> Optional[int]:
+            ts = getattr(obj, "time_stats", None)
+            if ts is None:
+                return None
+            if isinstance(ts, dict):
+                val = ts.get("time_estimate")
+            else:
+                val = getattr(ts, "time_estimate", None)
+            if val in (None, "", 0):
+                return None
+            try:
+                return int(val)
+            except Exception:
+                return None
+
         # Map assignees
         assignee_ids = []
         if hasattr(source_issue, 'assignees') and source_issue.assignees:
@@ -375,8 +410,21 @@ class SyncService:
         if hasattr(source_issue, 'due_date') and source_issue.due_date:
             issue_data["due_date"] = source_issue.due_date
 
+        # Optional fields
+        weight = getattr(source_issue, "weight", None)
+        if weight is not None:
+            issue_data["weight"] = weight
+
         # Create issue
         target_issue = target_client.create_issue(target_project_id, issue_data)
+
+        # Time estimate (best-effort via dedicated endpoint)
+        estimate_seconds = _time_estimate_seconds(source_issue)
+        if estimate_seconds:
+            try:
+                target_client.set_issue_time_estimate(target_project_id, target_issue.iid, estimate_seconds)
+            except Exception as e:
+                logger.warning(f"Failed to set time estimate on issue #{target_issue.iid}: {e}")
 
         # Sync comments
         self._sync_comments(
@@ -602,9 +650,10 @@ class SyncService:
                 sync_hash=synced_hash,
                 last_synced_at=self._utcnow(),
             )
-            self.db.add(row)
-            self.db.commit()
-            stats["created"] += 1
+            if self._safe_commit_synced_issue(row):
+                stats["created"] += 1
+            else:
+                stats["conflicts"] += 1
 
         return {"status": "success", "stats": stats, "pairs_found": len(pairs)}
 
@@ -620,6 +669,21 @@ class SyncService:
         stats: Optional[Dict[str, int]] = None,
     ):
         """Update existing target issue from source"""
+        def _time_estimate_seconds(obj: Any) -> Optional[int]:
+            ts = getattr(obj, "time_stats", None)
+            if ts is None:
+                return None
+            if isinstance(ts, dict):
+                val = ts.get("time_estimate")
+            else:
+                val = getattr(ts, "time_estimate", None)
+            if val in (None, "", 0):
+                return None
+            try:
+                return int(val)
+            except Exception:
+                return None
+
         # Map assignees
         # Always set assignee_ids so removals on source clear target.
         assignee_ids: List[int] = []
@@ -662,6 +726,8 @@ class SyncService:
         # GitLab often uses milestone_id=0 to clear; treat None as "clear".
         update_data["milestone_id"] = milestone_id if milestone_id is not None else 0
         update_data["due_date"] = getattr(source_issue, "due_date", None)
+        # Weight can be null on GitLab; set it explicitly so removals clear.
+        update_data["weight"] = getattr(source_issue, "weight", None)
 
         # Handle state changes
         target_issue = target_client.get_issue(target_project_id, target_issue_iid)
@@ -670,6 +736,16 @@ class SyncService:
 
         # Update issue
         target_client.update_issue(target_project_id, target_issue_iid, update_data)
+
+        # Time estimate (best-effort via dedicated endpoint)
+        estimate_seconds = _time_estimate_seconds(source_issue)
+        try:
+            if estimate_seconds:
+                target_client.set_issue_time_estimate(target_project_id, target_issue_iid, estimate_seconds)
+            else:
+                target_client.reset_issue_time_estimate(target_project_id, target_issue_iid)
+        except Exception as e:
+            logger.warning(f"Failed to sync time estimate for issue #{target_issue_iid}: {e}")
 
         # Sync new comments
         self._sync_comments(
@@ -775,6 +851,17 @@ class SyncService:
         )
         self.db.add(log)
         self.db.commit()
+
+    def _safe_commit_synced_issue(self, row: SyncedIssue) -> bool:
+        """Commit a SyncedIssue row, swallowing duplicate-mapping races."""
+        try:
+            self.db.add(row)
+            self.db.commit()
+            return True
+        except IntegrityError:
+            # Another worker likely created the mapping first.
+            self.db.rollback()
+            return False
 
     def sync_project_pair(self, project_pair_id: int) -> Dict[str, Any]:
         """Sync issues for a project pair"""
@@ -998,7 +1085,11 @@ class SyncService:
                             if self._normalize_instance_url(target_instance.url) == ref_url:
                                 other_issue, rc = target_client.get_issue_optional(target_project_id, ref_iid)
                                 if other_issue is not None:
-                                    source_hash = self._compute_issue_hash(source_issue)
+                                    source_hash = self._compute_synced_hash(
+                                        source_issue,
+                                        source_instance_url=source_instance.url,
+                                        source_project_id=source_project_id,
+                                    )
                                     if direction == SyncDirection.SOURCE_TO_TARGET:
                                         rebuilt = SyncedIssue(
                                             project_pair_id=project_pair.id,
@@ -1021,9 +1112,10 @@ class SyncService:
                                             last_synced_at=self._utcnow(),
                                         )
 
-                                    self.db.add(rebuilt)
-                                    self.db.commit()
-                                    stats["created"] += 1
+                                    if self._safe_commit_synced_issue(rebuilt):
+                                        stats["created"] += 1
+                                    else:
+                                        stats["skipped"] += 1
                                     continue
                                 if rc in (401, 403):
                                     # Don't create a duplicate if we can see it's a mirrored issue but can't access the pair.
@@ -1076,9 +1168,10 @@ class SyncService:
                                 target_issue_id=source_issue.id,
                                 sync_hash=source_hash,
                             )
-                        self.db.add(synced_issue)
-                        self.db.commit()
-                        stats["created"] += 1
+                        if self._safe_commit_synced_issue(synced_issue):
+                            stats["created"] += 1
+                        else:
+                            stats["skipped"] += 1
 
                 except Exception as e:
                     # Ensure a single issue failure doesn't poison the session for the rest of the run.
