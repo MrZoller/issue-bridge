@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     """Application settings"""
 
     # Database
-    database_url: str = "sqlite:///./gitlab_sync.db"
+    database_url: str = "sqlite:///./issuebridge.db"
 
     # Server
     host: str = "0.0.0.0"

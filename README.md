@@ -1,4 +1,4 @@
-# GitLab Issue Transfer Buddy
+# IssueBridge
 
 A comprehensive service for synchronizing GitLab issues between different GitLab instances. This tool is perfect for organizations that maintain mirrors of their repositories across multiple GitLab instances and need to keep issues in sync.
 
@@ -48,7 +48,7 @@ A comprehensive service for synchronizing GitLab issues between different GitLab
 1. **Clone the repository**:
    ```bash
    git clone <repository-url>
-   cd GitLabIssueTransferBuddy
+   cd IssueBridge
    ```
 
 2. **Start the service**:
@@ -81,7 +81,7 @@ docker-compose down
 docker-compose up -d --build
 
 # Access the database
-docker-compose exec gitlab-sync sqlite3 /data/gitlab_sync.db
+docker-compose exec issuebridge sqlite3 /data/issuebridge.db
 ```
 
 ## Manual Installation (Without Docker)
@@ -99,7 +99,7 @@ docker-compose exec gitlab-sync sqlite3 /data/gitlab_sync.db
 1. **Clone the repository**:
    ```bash
    git clone <repository-url>
-   cd GitLabIssueTransferBuddy
+   cd IssueBridge
    ```
 
 2. **Create virtual environment**:
@@ -135,7 +135,7 @@ Create a `.env` file or set these environment variables:
 
 ```env
 # Database Configuration
-DATABASE_URL=sqlite:///./gitlab_sync.db
+DATABASE_URL=sqlite:///./issuebridge.db
 
 # Server Configuration
 HOST=0.0.0.0
@@ -200,7 +200,7 @@ Your token must have these scopes:
 
 #### Where Tokens Are Used
 
-After creating your tokens, you'll enter them in the GitLab Issue Transfer Buddy web interface:
+After creating your tokens, you'll enter them in the IssueBridge web interface:
 1. Navigate to the **"GitLab Instances"** tab
 2. Click **"Add Instance"**
 3. Enter the instance URL and paste the **Access Token** you created
@@ -316,14 +316,14 @@ Once the service is running, visit:
 
 ### SQLite (Default)
 
-By default, the application uses SQLite stored at `./gitlab_sync.db` (or `/data/gitlab_sync.db` in Docker).
+By default, the application uses SQLite stored at `./issuebridge.db` (or `/data/issuebridge.db` in Docker).
 
 ### PostgreSQL (Production)
 
 For production use with PostgreSQL, update the `DATABASE_URL`:
 
 ```env
-DATABASE_URL=postgresql://user:password@localhost/gitlab_sync
+DATABASE_URL=postgresql://user:password@localhost/issuebridge
 ```
 
 And add `psycopg2-binary` to your requirements.
@@ -357,7 +357,7 @@ View application logs:
 
 ```bash
 # Docker
-docker-compose logs -f gitlab-sync
+docker-compose logs -f issuebridge
 
 # Manual installation
 # Logs are printed to stdout
@@ -368,7 +368,7 @@ docker-compose logs -f gitlab-sync
 ### Project Structure
 
 ```
-GitLabIssueTransferBuddy/
+IssueBridge/
 ├── app/
 │   ├── api/              # API endpoints
 │   ├── models/           # Database models
