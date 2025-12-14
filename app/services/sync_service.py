@@ -52,16 +52,104 @@ class SyncService:
         r"\*Synced from:\s*(?P<url>https?://[^\s*]+?)/-?/issues/(?P<iid>\d+)\*",
         re.IGNORECASE,
     )
+    _ISSUE_MARKER_RE = re.compile(
+        r"<!--\s*gl-issue-sync:(?P<b64>[A-Za-z0-9+/=]+)\s*-->",
+        re.IGNORECASE,
+    )
+    _NOTE_MARKER_RE = re.compile(
+        r"<!--\s*gl-issue-sync-note:(?P<b64>[A-Za-z0-9+/=]+)\s*-->",
+        re.IGNORECASE,
+    )
 
     @staticmethod
     def _normalize_instance_url(url: str) -> str:
         return (url or "").rstrip("/")
+
+    @staticmethod
+    def _b64_json(data: Dict[str, Any]) -> str:
+        import base64
+        raw = json.dumps(data, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        return base64.b64encode(raw).decode("ascii")
+
+    @staticmethod
+    def _b64_json_load(value: str) -> Optional[Dict[str, Any]]:
+        import base64
+        try:
+            raw = base64.b64decode(value.encode("ascii"))
+            obj = json.loads(raw.decode("utf-8"))
+            return obj if isinstance(obj, dict) else None
+        except Exception:
+            return None
+
+    @classmethod
+    def _issue_marker(cls, *, source_instance_url: str, source_project_id: str, source_issue_iid: int) -> str:
+        payload = {
+            "v": 1,
+            "source_instance_url": cls._normalize_instance_url(source_instance_url),
+            "source_project_id": str(source_project_id),
+            "source_issue_iid": int(source_issue_iid),
+        }
+        return f"<!-- gl-issue-sync:{cls._b64_json(payload)} -->"
+
+    @classmethod
+    def _note_marker(
+        cls,
+        *,
+        source_instance_url: str,
+        source_project_id: str,
+        source_issue_iid: int,
+        source_note_id: int,
+    ) -> str:
+        payload = {
+            "v": 1,
+            "source_instance_url": cls._normalize_instance_url(source_instance_url),
+            "source_project_id": str(source_project_id),
+            "source_issue_iid": int(source_issue_iid),
+            "source_note_id": int(source_note_id),
+        }
+        return f"<!-- gl-issue-sync-note:{cls._b64_json(payload)} -->"
+
+    @classmethod
+    def _parse_issue_marker(cls, description: Optional[str]) -> Optional[Tuple[str, str, int]]:
+        """Return (source_instance_url, source_project_id, source_issue_iid) if marker found."""
+        if not description:
+            return None
+        m = cls._ISSUE_MARKER_RE.search(description)
+        if not m:
+            return None
+        data = cls._b64_json_load(m.group("b64"))
+        if not data:
+            return None
+        try:
+            return (
+                cls._normalize_instance_url(str(data["source_instance_url"])),
+                str(data["source_project_id"]),
+                int(data["source_issue_iid"]),
+            )
+        except Exception:
+            return None
+
+    @classmethod
+    def _extract_note_marker(cls, body: Optional[str]) -> Optional[Dict[str, Any]]:
+        if not body:
+            return None
+        m = cls._NOTE_MARKER_RE.search(body)
+        if not m:
+            return None
+        data = cls._b64_json_load(m.group("b64"))
+        # Marker present but payload unreadable: still treat as "sync note".
+        return data or {}
 
     @classmethod
     def _parse_sync_reference(cls, description: Optional[str]) -> Optional[Tuple[str, int]]:
         """Parse our sync reference note to detect mirrored issues."""
         if not description:
             return None
+        # Prefer machine-readable marker (new format)
+        marked = cls._parse_issue_marker(description)
+        if marked is not None:
+            src_url, _src_pid, src_iid = marked
+            return src_url, src_iid
         m = cls._SYNC_REF_RE.search(description)
         if not m:
             return None
@@ -177,10 +265,19 @@ class SyncService:
         }
         return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
 
-    def _add_sync_reference(self, description: str, instance_url: str, issue_iid: int) -> str:
+    def _add_sync_reference(
+        self, description: str, instance_url: str, issue_iid: int, source_project_id: Optional[str] = None
+    ) -> str:
         """Add sync reference to issue description"""
         base = self._normalize_instance_url(instance_url)
-        sync_note = f"\n\n---\n*Synced from: {base}/-/issues/{issue_iid}*"
+        marker = ""
+        if source_project_id:
+            marker = "\n" + self._issue_marker(
+                source_instance_url=base,
+                source_project_id=str(source_project_id),
+                source_issue_iid=int(issue_iid),
+            )
+        sync_note = f"\n\n---\n*Synced from: {base}/-/issues/{issue_iid}*{marker}"
         if sync_note not in (description or ""):
             return (description or "") + sync_note
         return description or ""
@@ -225,7 +322,7 @@ class SyncService:
         issue_data = {
             "title": source_issue.title,
             "description": self._add_sync_reference(
-                source_issue.description, source_instance.url, source_issue.iid
+                source_issue.description, source_instance.url, source_issue.iid, source_project_id
             ),
             "labels": source_issue.labels if source_issue.labels else [],
         }
@@ -275,22 +372,58 @@ class SyncService:
                 source_pid, source_issue.iid
             )
 
-            # Get existing target notes to avoid duplicates
+            source_base = self._normalize_instance_url(source_instance.url)
+
+            # Get existing target notes to avoid duplicates / loops
             target_notes = target_client.get_issue_notes(target_project_id, target_issue.iid)
-            existing_note_bodies = {note.body for note in target_notes if getattr(note, "body", None)}
+            existing_note_markers: set[tuple[str, str, int, int]] = set()
+            existing_note_bodies = set()
+            for n in target_notes:
+                body = getattr(n, "body", None)
+                if body:
+                    existing_note_bodies.add(body)
+                    data = self._extract_note_marker(body)
+                    if data:
+                        try:
+                            existing_note_markers.add(
+                                (
+                                    self._normalize_instance_url(str(data["source_instance_url"])),
+                                    str(data["source_project_id"]),
+                                    int(data["source_issue_iid"]),
+                                    int(data["source_note_id"]),
+                                )
+                            )
+                        except Exception:
+                            pass
 
             for note in source_notes:
                 # Skip system notes
                 if note.system:
                     continue
+                # Skip notes that were created by this sync tool to prevent ping-pong loops.
+                if self._NOTE_MARKER_RE.search(getattr(note, "body", "") or ""):
+                    continue
 
                 # Format note with author attribution
                 author = self._extract_username(getattr(note, "author", None)) or "unknown"
-                author_note = f"**Comment by @{author}:**\n\n{note.body}"
+                source_note_id = getattr(note, "id", None)
+                marker = ""
+                if source_note_id is not None:
+                    marker = "\n\n---\n" + self._note_marker(
+                        source_instance_url=source_base,
+                        source_project_id=str(source_pid),
+                        source_issue_iid=int(source_issue.iid),
+                        source_note_id=int(source_note_id),
+                    )
+                author_note = f"**Comment by @{author}:**\n\n{note.body}{marker}"
 
                 # Skip if already synced
                 if author_note in existing_note_bodies:
                     continue
+                if source_note_id is not None:
+                    key = (source_base, str(source_pid), int(source_issue.iid), int(source_note_id))
+                    if key in existing_note_markers:
+                        continue
 
                 target_client.create_issue_note(target_project_id, target_issue.iid, author_note)
 
@@ -339,7 +472,7 @@ class SyncService:
         update_data = {
             "title": source_issue.title,
             "description": self._add_sync_reference(
-                source_issue.description, source_instance.url, source_issue.iid
+                source_issue.description, source_instance.url, source_issue.iid, source_project_id
             ),
             "labels": source_issue.labels if source_issue.labels else [],
             "assignee_ids": assignee_ids,

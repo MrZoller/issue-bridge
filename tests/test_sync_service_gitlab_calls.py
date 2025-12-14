@@ -58,22 +58,30 @@ class SyncServiceGitLabCallTests(unittest.TestCase):
 
         # source notes
         n1 = SimpleNamespace(system=True, author={"username": "bot"}, body="sys")
-        n2 = SimpleNamespace(system=False, author={"username": "alice"}, body="hello")
-        n3 = SimpleNamespace(system=False, author=None, body="world")
+        n2 = SimpleNamespace(id=2, system=False, author={"username": "alice"}, body="hello")
+        n3 = SimpleNamespace(id=3, system=False, author=None, body="world")
 
         source_client = Mock()
         source_client.get_issue_notes.return_value = [n1, n2, n3]
 
         target_client = Mock()
-        # existing note body matches alice note -> should dedupe
-        existing = SimpleNamespace(body="**Comment by @alice:**\n\nhello")
+        # existing note body contains marker for alice note -> should dedupe
+        existing = SimpleNamespace(
+            body="**Comment by @alice:**\n\nhello\n\n---\n"
+            + SyncService._note_marker(
+                source_instance_url="https://src",
+                source_project_id="sproj",
+                source_issue_iid=7,
+                source_note_id=2,
+            )
+        )
         target_client.get_issue_notes.return_value = [existing]
 
         with patch.object(svc, "_get_client", return_value=source_client, autospec=True):
             svc._sync_comments(
                 source_issue=SimpleNamespace(iid=7, project_id="ignored"),
                 target_issue=SimpleNamespace(iid=9),
-                source_instance=SimpleNamespace(id=1),
+                source_instance=SimpleNamespace(id=1, url="https://src"),
                 target_client=target_client,
                 target_project_id="tproj",
                 target_instance_id=2,
@@ -82,9 +90,17 @@ class SyncServiceGitLabCallTests(unittest.TestCase):
 
         source_client.get_issue_notes.assert_called_once_with("sproj", 7)
         target_client.get_issue_notes.assert_called_once_with("tproj", 9)
-        # n1 skipped (system); n2 skipped (duplicate); n3 created with unknown author
+        # n1 skipped (system); n2 skipped (duplicate marker); n3 created with unknown author + marker
         target_client.create_issue_note.assert_called_once_with(
-            "tproj", 9, "**Comment by @unknown:**\n\nworld"
+            "tproj",
+            9,
+            "**Comment by @unknown:**\n\nworld\n\n---\n"
+            + SyncService._note_marker(
+                source_instance_url="https://src",
+                source_project_id="sproj",
+                source_issue_iid=7,
+                source_note_id=3,
+            ),
         )
 
 
