@@ -1,7 +1,7 @@
 """Sync management endpoints"""
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 from pydantic import BaseModel
 from datetime import datetime
 
@@ -98,10 +98,15 @@ def list_conflicts(
 @router.post("/conflicts/{conflict_id}/resolve")
 def resolve_conflict(
     conflict_id: int,
-    resolution_notes: str = None,
+    request: Request,
+    resolution_notes: Optional[str] = Body(None, embed=True),
     db: Session = Depends(get_db)
 ):
     """Mark a conflict as resolved"""
+    # Backwards compatibility: older clients may still pass ?resolution_notes=...
+    if resolution_notes is None:
+        resolution_notes = request.query_params.get("resolution_notes")
+
     conflict = db.query(Conflict).filter(Conflict.id == conflict_id).first()
     if not conflict:
         raise HTTPException(status_code=404, detail="Conflict not found")
