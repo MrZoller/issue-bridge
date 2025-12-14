@@ -2,7 +2,9 @@
 import gitlab
 import logging
 from typing import List, Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime, timezone
+import time
+from urllib.parse import quote
 
 logger = logging.getLogger(__name__)
 
@@ -16,10 +18,60 @@ class GitLabClient:
         self.gl = gitlab.Gitlab(url, private_token=access_token)
         self.gl.auth()
 
+    @staticmethod
+    def _should_retry(exc: Exception) -> bool:
+        """Best-effort retry predicate for transient GitLab failures."""
+        # python-gitlab exceptions often carry an HTTP response code
+        rc = getattr(exc, "response_code", None)
+        if rc in (429, 500, 502, 503, 504):
+            return True
+        # If we can't classify, don't retry to avoid hiding real issues.
+        return False
+
+    def _with_retries(self, fn, *, max_attempts: int = 3, base_delay_s: float = 0.5):
+        """Run callable with small exponential backoff on transient errors."""
+        attempt = 1
+        while True:
+            try:
+                return fn()
+            except Exception as e:
+                if attempt >= max_attempts or not self._should_retry(e):
+                    raise
+                time.sleep(base_delay_s * (2 ** (attempt - 1)))
+                attempt += 1
+
+    @staticmethod
+    def _normalize_issue_payload(issue_data: Dict[str, Any], *, for_update: bool) -> Dict[str, Any]:
+        """Normalize payload fields for GitLab API quirks."""
+        data = dict(issue_data)
+
+        # GitLab API expects comma-separated string for `labels`. Some servers ignore empty lists.
+        if "labels" in data:
+            labels = data.get("labels")
+            if labels is None:
+                if for_update:
+                    data["labels"] = ""
+                else:
+                    data.pop("labels", None)
+            elif isinstance(labels, list):
+                if len(labels) == 0:
+                    if for_update:
+                        data["labels"] = ""
+                    else:
+                        data.pop("labels", None)
+                else:
+                    data["labels"] = ",".join(labels)
+
+        # Clearing due_date is best-effort with empty string (GitLab accepts this commonly).
+        if for_update and "due_date" in data and data.get("due_date") is None:
+            data["due_date"] = ""
+
+        return data
+
     def get_project(self, project_id: str):
         """Get project by ID or path"""
         try:
-            return self.gl.projects.get(project_id)
+            return self._with_retries(lambda: self.gl.projects.get(project_id))
         except gitlab.exceptions.GitlabGetError as e:
             logger.error(f"Failed to get project {project_id}: {e}")
             raise
@@ -28,11 +80,24 @@ class GitLabClient:
         """Get all issues from a project"""
         try:
             project = self.get_project(project_id)
-            params = {"order_by": "updated_at", "sort": "desc"}
+            # Important defaults:
+            # - GitLab defaults to state=opened; we must include closed issues for correct syncing.
+            # - Use get_all=True for proper pagination across python-gitlab versions.
+            params = {
+                "order_by": "updated_at",
+                "sort": "desc",
+                "state": "all",
+                "per_page": 100,
+                # Needed for robust estimate syncing.
+                "with_time_stats": True,
+            }
             if updated_after:
+                # Our DB uses UTC tz-naive; assume UTC if tzinfo is missing.
+                if updated_after.tzinfo is None:
+                    updated_after = updated_after.replace(tzinfo=timezone.utc)
                 params["updated_after"] = updated_after.isoformat()
 
-            issues = project.issues.list(all=True, **params)
+            issues = self._with_retries(lambda: project.issues.list(get_all=True, **params))
             return issues
         except Exception as e:
             logger.error(f"Failed to get issues for project {project_id}: {e}")
@@ -42,16 +107,34 @@ class GitLabClient:
         """Get a specific issue by IID"""
         try:
             project = self.get_project(project_id)
-            return project.issues.get(issue_iid)
+            return self._with_retries(lambda: project.issues.get(issue_iid))
         except gitlab.exceptions.GitlabGetError as e:
             logger.error(f"Failed to get issue {issue_iid} from project {project_id}: {e}")
             raise
+
+    def get_issue_or_none(self, project_id: str, issue_iid: int) -> Optional[Any]:
+        """Get a specific issue by IID, returning None on 404/403."""
+        issue, rc = self.get_issue_optional(project_id, issue_iid)
+        if issue is not None:
+            return issue
+        if rc in (403, 404):
+            return None
+        # For unexpected cases, raise to surface the error.
+        raise gitlab.exceptions.GitlabGetError("Failed to get issue", response_code=rc)
+
+    def get_issue_optional(self, project_id: str, issue_iid: int) -> tuple[Optional[Any], Optional[int]]:
+        """Get issue by IID, returning (issue, response_code_if_error)."""
+        try:
+            return self.get_issue(project_id, issue_iid), None
+        except gitlab.exceptions.GitlabGetError as e:
+            return None, getattr(e, "response_code", None)
 
     def create_issue(self, project_id: str, issue_data: Dict[str, Any]) -> Any:
         """Create a new issue"""
         try:
             project = self.get_project(project_id)
-            issue = project.issues.create(issue_data)
+            payload = self._normalize_issue_payload(issue_data, for_update=False)
+            issue = self._with_retries(lambda: project.issues.create(payload))
             logger.info(f"Created issue #{issue.iid} in project {project_id}")
             return issue
         except Exception as e:
@@ -62,10 +145,11 @@ class GitLabClient:
         """Update an existing issue"""
         try:
             project = self.get_project(project_id)
-            issue = project.issues.get(issue_iid)
-            for key, value in issue_data.items():
+            issue = self._with_retries(lambda: project.issues.get(issue_iid))
+            payload = self._normalize_issue_payload(issue_data, for_update=True)
+            for key, value in payload.items():
                 setattr(issue, key, value)
-            issue.save()
+            self._with_retries(lambda: issue.save())
             logger.info(f"Updated issue #{issue_iid} in project {project_id}")
             return issue
         except Exception as e:
@@ -76,8 +160,10 @@ class GitLabClient:
         """Get all notes (comments) for an issue"""
         try:
             project = self.get_project(project_id)
-            issue = project.issues.get(issue_iid)
-            return issue.notes.list(all=True, order_by="created_at", sort="asc")
+            issue = self._with_retries(lambda: project.issues.get(issue_iid))
+            return self._with_retries(
+                lambda: issue.notes.list(get_all=True, per_page=100, order_by="created_at", sort="asc")
+            )
         except Exception as e:
             logger.error(f"Failed to get notes for issue {issue_iid}: {e}")
             raise
@@ -86,8 +172,8 @@ class GitLabClient:
         """Create a note (comment) on an issue"""
         try:
             project = self.get_project(project_id)
-            issue = project.issues.get(issue_iid)
-            note = issue.notes.create({"body": note_body})
+            issue = self._with_retries(lambda: project.issues.get(issue_iid))
+            note = self._with_retries(lambda: issue.notes.create({"body": note_body}))
             logger.info(f"Created note on issue #{issue_iid}")
             return note
         except Exception as e:
@@ -97,7 +183,7 @@ class GitLabClient:
     def get_user_by_username(self, username: str) -> Optional[Any]:
         """Get user by username"""
         try:
-            users = self.gl.users.list(username=username)
+            users = self._with_retries(lambda: self.gl.users.list(username=username))
             return users[0] if users else None
         except Exception as e:
             logger.error(f"Failed to get user {username}: {e}")
@@ -107,7 +193,7 @@ class GitLabClient:
         """Get all labels for a project"""
         try:
             project = self.get_project(project_id)
-            return project.labels.list(all=True)
+            return self._with_retries(lambda: project.labels.list(get_all=True, per_page=100))
         except Exception as e:
             logger.error(f"Failed to get labels for project {project_id}: {e}")
             raise
@@ -116,7 +202,7 @@ class GitLabClient:
         """Create a label in a project"""
         try:
             project = self.get_project(project_id)
-            label = project.labels.create({"name": name, "color": color})
+            label = self._with_retries(lambda: project.labels.create({"name": name, "color": color}))
             logger.info(f"Created label '{name}' in project {project_id}")
             return label
         except Exception as e:
@@ -127,7 +213,7 @@ class GitLabClient:
         """Get all milestones for a project"""
         try:
             project = self.get_project(project_id)
-            return project.milestones.list(all=True)
+            return self._with_retries(lambda: project.milestones.list(get_all=True, per_page=100))
         except Exception as e:
             logger.error(f"Failed to get milestones for project {project_id}: {e}")
             raise
@@ -136,9 +222,78 @@ class GitLabClient:
         """Create a milestone in a project"""
         try:
             project = self.get_project(project_id)
-            milestone = project.milestones.create(milestone_data)
+            milestone = self._with_retries(lambda: project.milestones.create(milestone_data))
             logger.info(f"Created milestone '{milestone_data.get('title')}' in project {project_id}")
             return milestone
         except Exception as e:
             logger.warning(f"Failed to create milestone: {e}")
             return None
+
+    def get_project_namespace(self, project_id: str) -> Optional[Dict[str, Any]]:
+        """Return project namespace dict (id/kind/full_path) if available."""
+        try:
+            project = self.get_project(project_id)
+            ns = getattr(project, "namespace", None)
+            if ns is None:
+                return None
+            # python-gitlab may return dict or object
+            if isinstance(ns, dict):
+                return ns
+            return {
+                "id": getattr(ns, "id", None),
+                "kind": getattr(ns, "kind", None),
+                "full_path": getattr(ns, "full_path", None),
+            }
+        except Exception as e:
+            logger.warning(f"Failed to get namespace for project {project_id}: {e}")
+            return None
+
+    def list_group_iterations(self, group_id: int) -> List[Dict[str, Any]]:
+        """List iterations for a group (best-effort, returns raw dicts)."""
+        gid = quote(str(int(group_id)), safe="")
+        path = f"/groups/{gid}/iterations"
+        return self._with_retries(lambda: self.gl.http_list(path, query_data={"per_page": 100}))
+
+    def create_group_iteration(self, group_id: int, *, title: str, start_date: str, due_date: str) -> Optional[Dict[str, Any]]:
+        """Create a group iteration (best-effort)."""
+        gid = quote(str(int(group_id)), safe="")
+        path = f"/groups/{gid}/iterations"
+        try:
+            return self._with_retries(
+                lambda: self.gl.http_post(path, post_data={"title": title, "start_date": start_date, "due_date": due_date})
+            )
+        except Exception as e:
+            logger.warning(f"Failed to create iteration '{title}' in group {group_id}: {e}")
+            return None
+
+    def list_group_epics(self, group_id: int, *, search: Optional[str] = None) -> List[Dict[str, Any]]:
+        """List epics for a group (best-effort, returns raw dicts)."""
+        gid = quote(str(int(group_id)), safe="")
+        path = f"/groups/{gid}/epics"
+        query: Dict[str, Any] = {"per_page": 100}
+        if search:
+            query["search"] = search
+        return self._with_retries(lambda: self.gl.http_list(path, query_data=query))
+
+    def add_issue_to_epic(self, group_id: int, epic_iid: int, *, issue_id: int) -> Optional[Dict[str, Any]]:
+        """Link an issue (by numeric issue ID) to an epic (by epic IID)."""
+        gid = quote(str(int(group_id)), safe="")
+        path = f"/groups/{gid}/epics/{int(epic_iid)}/issues/{int(issue_id)}"
+        try:
+            return self._with_retries(lambda: self.gl.http_post(path, post_data={}))
+        except Exception as e:
+            logger.warning(f"Failed to link issue {issue_id} to epic &{epic_iid} in group {group_id}: {e}")
+            return None
+
+    def set_issue_time_estimate(self, project_id: str, issue_iid: int, seconds: int) -> Any:
+        """Set time estimate for an issue (seconds)."""
+        pid = quote(str(project_id), safe="")
+        duration = f"{int(seconds)}s"
+        path = f"/projects/{pid}/issues/{int(issue_iid)}/time_estimate"
+        return self._with_retries(lambda: self.gl.http_post(path, post_data={"duration": duration}))
+
+    def reset_issue_time_estimate(self, project_id: str, issue_iid: int) -> Any:
+        """Reset/clear time estimate for an issue."""
+        pid = quote(str(project_id), safe="")
+        path = f"/projects/{pid}/issues/{int(issue_iid)}/reset_time_estimate"
+        return self._with_retries(lambda: self.gl.http_post(path, post_data={}))

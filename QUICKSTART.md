@@ -186,6 +186,13 @@ Your token must have **all three** of these scopes:
 3. Verify access tokens are valid
 4. Ensure project IDs/paths are correct
 
+### Lost database / mappings look wrong?
+
+IssueBridge embeds hidden “sync markers” in issue descriptions so it can rebuild mappings safely.
+
+- Use: `POST /api/sync/{pair_id}/repair-mappings`
+- See the “Sync Markers” section in `README.md` for details.
+
 ### Conflicts appearing?
 
 1. Go to "Conflicts" tab

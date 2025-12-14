@@ -7,7 +7,7 @@ A comprehensive service for synchronizing GitLab issues between different GitLab
 - **Bi-directional Synchronization**: Sync issues in both directions or configure one-way sync per project pair
 - **Multiple Project Pairs**: Configure and manage multiple project pairs simultaneously
 - **User Mapping**: Map usernames between different GitLab instances
-- **Comprehensive Field Sync**: Syncs title, description, labels, status, comments, assignees, milestones, and due dates
+- **Comprehensive Field Sync**: Syncs title, description, labels, status, comments, assignees, milestones, due dates, weight, time estimate, issue type, and (best-effort) iteration + epic linking
 - **Conflict Detection**: Automatically detects and logs conflicts for manual resolution
 - **Web Interface**: Easy-to-use web dashboard for configuration and monitoring
 - **Automated Scheduling**: Configurable sync intervals with background scheduler
@@ -274,7 +274,7 @@ Navigate to the "Conflicts" tab to view and resolve conflicts:
 
 1. **Fetch Issues**: Retrieve all issues from source project
 2. **Check Sync Status**: Look up existing sync records
-3. **Detect Changes**: Compare update timestamps
+3. **Detect Changes**: Compare content hashes and timestamps (handles comment-only updates)
 4. **Conflict Detection**: Check for concurrent updates
 5. **Apply Changes**: Create or update issues on target
 6. **Sync Comments**: Transfer comments with author attribution
@@ -289,11 +289,82 @@ Conflicts are detected when:
 
 ### Issue Linking
 
-Synced issues include a reference in their description:
-```
+IssueBridge embeds a human-friendly cross-reference and a machine-readable marker in the issue description. See the next section for details.
+
+## Sync Markers (robust dedupe, loop prevention, and repair)
+
+IssueBridge uses **hidden HTML comment markers** in issue descriptions and comments to:
+
+- **prevent bidirectional “ping-pong” loops**
+- **dedupe synced comments** reliably (even if users edit text)
+- **rebuild mappings** if the database is lost or out of sync
+- **best-effort restore relationships** (iteration/epic/milestone/issue type) during repair
+
+### Issue description marker
+
+Every synced issue includes:
+
+- a human-friendly line:
+
+```text
 ---
-Synced from: https://gitlab.example.com/-/issues/123
+*Synced from: https://gitlab.example.com/-/issues/123*
 ```
+
+- and a hidden marker (HTML comment), appended once:
+
+```text
+<!-- gl-issue-sync:BASE64_JSON -->
+```
+
+#### Marker versions
+
+- **v1**: minimal mapping identity
+  - `source_instance_url`
+  - `source_project_id`
+  - `source_issue_iid`
+- **v2** (current): v1 + stable relationship hints (IDs may differ across instances)
+  - `issue_type`
+  - `milestone_title`
+  - `iteration_title`, `iteration_start_date`, `iteration_due_date`
+  - `epic_title`
+
+IssueBridge remains backwards compatible: it can still parse and use older v1 markers, and it still recognizes the human-friendly `*Synced from:*` line for older issues.
+
+### Comment marker (notes)
+
+Synced comments are created with a hidden marker so IssueBridge can dedupe by the **source note id** and avoid re-syncing its own notes:
+
+```text
+<!-- gl-issue-sync-note:BASE64_JSON -->
+```
+
+The comment marker includes:
+- `source_instance_url`
+- `source_project_id`
+- `source_issue_iid`
+- `source_note_id`
+
+### Visibility and safety
+
+- **Visibility**: HTML comments are not rendered in GitLab’s UI, but they will appear in the raw markdown text.
+- **Don’t edit/remove markers** unless you know what you’re doing. If they are removed:
+  - bidirectional loop-prevention becomes less reliable
+  - mapping repair may not be able to reconstruct relationships
+- **Security/privacy**: markers contain *metadata only* (URLs, project identifiers, titles, and ids). They should not contain tokens or secrets.
+
+### Repairing mappings (and relationships)
+
+If your database is reset, or `synced_issues` mappings are missing/incorrect, you can run a safe repair that scans markers and rebuilds mappings:
+
+- `POST /api/sync/{pair_id}/repair-mappings`
+
+This repair is **non-destructive**: it creates missing mappings and will not overwrite existing mappings. It also attempts (best-effort) to restore missing relationships using marker v2 data:
+
+- milestone (by title)
+- iteration (by title; may create iteration if dates are present and permissions allow)
+- epic link (by title; group epics must be available on the target)
+- issue type
 
 ## API Documentation
 
@@ -309,6 +380,7 @@ Once the service is running, visit:
 - `GET /api/project-pairs/` - List project pairs
 - `POST /api/project-pairs/` - Create project pair
 - `POST /api/sync/{pair_id}/trigger` - Manually trigger sync
+- `POST /api/sync/{pair_id}/repair-mappings` - Rebuild mappings from markers (safe)
 - `GET /api/sync/logs` - Get sync logs
 - `GET /api/sync/conflicts` - List conflicts
 
@@ -386,11 +458,10 @@ issue-bridge/
 
 ### Running Tests
 
-Tests can be added in a `tests/` directory using pytest:
+Unit tests live under `tests/` and run with the standard library `unittest`:
 
 ```bash
-pip install pytest pytest-asyncio
-pytest
+python3 -m unittest discover -s tests -p 'test_*.py'
 ```
 
 ### Contributing

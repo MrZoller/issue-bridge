@@ -444,6 +444,20 @@ This test enables two-way synchronization.
    - ✅ Description includes link back to target issue
    - ✅ Label: `target-created`
 
+#### Verify markers and loop-prevention (recommended)
+
+In bidirectional mode, IssueBridge uses hidden “sync markers” to prevent ping-pong loops and dedupe comments.
+
+1. Open a synced issue on the target project.
+2. Click **Edit** (or view raw markdown) and confirm the description contains:
+   - a human-friendly line like `*Synced from: https://.../-/issues/123*`
+   - a hidden HTML comment marker like `<!-- gl-issue-sync:... -->`
+3. Add a new comment on the source issue, wait for sync, then confirm on the target issue:
+   - the synced comment appears once
+   - the raw comment body contains a hidden marker like `<!-- gl-issue-sync-note:... -->`
+
+If markers are missing, dedupe and repair will be less reliable. See the “Sync Markers” section in `README.md`.
+
 ---
 
 ### Test 5: Comment Synchronization
@@ -716,6 +730,17 @@ curl -X POST http://localhost:8001/api/sync/{pair_id}/trigger
    - **Fix:** Delete test DB and restart (migrations run automatically)
 3. Corrupt database
    - **Fix:** Delete `test_issuebridge.db` and restart application
+
+### Repairing mappings (safe)
+
+If you intentionally delete/reset the test database (or mappings look inconsistent), you can rebuild mappings from the embedded markers:
+
+- `POST /api/sync/{pair_id}/repair-mappings`
+
+Suggested verification after running repair:
+- Synced issues list repopulates
+- Bidirectional sync no longer creates duplicates
+- Comments do not duplicate on repeated sync runs
 
 **Verification:**
 ```bash

@@ -64,6 +64,17 @@ def trigger_sync(pair_id: int, db: Session = Depends(get_db)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.post("/{pair_id}/repair-mappings")
+def repair_mappings(pair_id: int, db: Session = Depends(get_db)):
+    """Rebuild SyncedIssue rows from embedded sync markers (safe, non-destructive)."""
+    sync_service = SyncService(db)
+    try:
+        return sync_service.repair_mappings(pair_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.get("/logs", response_model=List[SyncLogResponse])
 def list_sync_logs(

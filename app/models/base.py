@@ -1,6 +1,6 @@
 """Database base configuration"""
 from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import sessionmaker
 from app.config import settings
 
@@ -73,6 +73,45 @@ def _sqlite_conflicts_make_target_issue_iid_nullable():
         conn.exec_driver_sql("DROP TABLE conflicts_old")
 
 
+def _ensure_synced_issues_unique_indexes():
+    """
+    Best-effort schema hardening:
+    Ensure we don't store duplicate SyncedIssue mappings per project pair.
+
+    We use UNIQUE INDEXes because they are the most portable (and SQLite-friendly).
+    """
+    with engine.begin() as conn:
+        # If table doesn't exist yet, nothing to do.
+        if engine.dialect.name == "sqlite":
+            tables = {
+                row[0]
+                for row in conn.exec_driver_sql(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            }
+            if "synced_issues" not in tables:
+                return
+
+        # (project_pair_id, source_issue_iid) should be unique
+        # (project_pair_id, target_issue_iid) should be unique
+        stmts = [
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_synced_issues_pair_source_iid "
+            "ON synced_issues(project_pair_id, source_issue_iid)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_synced_issues_pair_target_iid "
+            "ON synced_issues(project_pair_id, target_issue_iid)",
+        ]
+        for sql in stmts:
+            try:
+                conn.exec_driver_sql(sql)
+            except Exception:
+                # Some dialects may not support IF NOT EXISTS; try without it.
+                try:
+                    conn.exec_driver_sql(sql.replace(" IF NOT EXISTS", ""))
+                except Exception:
+                    # Best-effort only; do not block app startup.
+                    pass
+
+
 def init_db():
     """Initialize database"""
     # Ensure all models are imported so SQLAlchemy metadata is populated.
@@ -81,3 +120,4 @@ def init_db():
 
     Base.metadata.create_all(bind=engine)
     _sqlite_conflicts_make_target_issue_iid_nullable()
+    _ensure_synced_issues_unique_indexes()
