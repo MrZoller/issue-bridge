@@ -14,7 +14,7 @@ Get IssueBridge up and running in minutes!
 
 1. **Start the service**:
    ```bash
-   cd IssueBridge
+   cd issue-bridge
    docker-compose up -d
    ```
 
@@ -83,7 +83,7 @@ docker-compose up -d --build
 
 1. **Set up Python environment**:
    ```bash
-   cd IssueBridge
+   cd issue-bridge
    python -m venv venv
    source venv/bin/activate  # On Windows: venv\Scripts\activate
    pip install -r requirements.txt

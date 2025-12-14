@@ -40,8 +40,8 @@ We welcome feature requests! Please open an issue with:
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/yourusername/IssueBridge.git
-   cd IssueBridge
+   git clone https://github.com/MrZoller/issue-bridge.git
+   cd issue-bridge
    ```
 
 2. Install dependencies (specific instructions will be added as the project develops)
