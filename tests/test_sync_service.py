@@ -219,7 +219,7 @@ class SyncServiceBehaviorTests(unittest.TestCase):
             )
 
         create_call.assert_not_called()
-        self.assertEqual(stats["skipped"], 1)
+        self.assertEqual(stats["skipped_inaccessible"], 1)
 
     def test_sync_direction_rolls_back_on_issue_error(self):
         from app.services.sync_service import SyncService

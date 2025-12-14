@@ -790,6 +790,7 @@ class SyncService:
             "updated": 0,
             "conflicts": 0,
             "skipped": 0,
+            "skipped_inaccessible": 0,
             "errors": 0,
         }
 
@@ -872,6 +873,7 @@ class SyncService:
             "updated": 0,
             "conflicts": 0,
             "skipped": 0,
+            "skipped_inaccessible": 0,
             "errors": 0,
         }
 
@@ -904,7 +906,7 @@ class SyncService:
                                 logger.warning(
                                     f"Skipping issue #{source_issue.iid}: target issue #{target_issue_iid} inaccessible (HTTP {rc})"
                                 )
-                                stats["skipped"] += 1
+                                stats["skipped_inaccessible"] += 1
                                 self._log_sync(
                                     project_pair,
                                     SyncStatus.SKIPPED,
@@ -1017,7 +1019,7 @@ class SyncService:
                                     logger.warning(
                                         f"Skipping issue #{source_issue.iid}: mirrored target issue #{ref_iid} inaccessible (HTTP {rc})"
                                     )
-                                    stats["skipped"] += 1
+                                    stats["skipped_inaccessible"] += 1
                                     self._log_sync(
                                         project_pair,
                                         SyncStatus.SKIPPED,
