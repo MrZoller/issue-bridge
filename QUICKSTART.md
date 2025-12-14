@@ -10,6 +10,10 @@ Get IssueBridge up and running in minutes!
   - Must have scopes: `api`, `read_api`, `write_repository`
   - See [Getting GitLab Access Tokens](#getting-gitlab-access-tokens) section below for step-by-step instructions
 
+### UI Preview (demo data)
+
+![IssueBridge Dashboard](docs/screenshots/dashboard.png)
+
 ### Steps
 
 1. **Start the service**:

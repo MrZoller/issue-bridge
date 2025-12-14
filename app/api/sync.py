@@ -16,11 +16,11 @@ router = APIRouter(prefix="/api/sync", tags=["sync"])
 class SyncLogResponse(BaseModel):
     id: int
     project_pair_id: int
-    source_issue_iid: int = None
-    target_issue_iid: int = None
+    source_issue_iid: Optional[int] = None
+    target_issue_iid: Optional[int] = None
     status: str
-    direction: str = None
-    message: str = None
+    direction: Optional[str] = None
+    message: Optional[str] = None
     created_at: datetime
 
     class Config:
@@ -31,7 +31,7 @@ class ConflictResponse(BaseModel):
     id: int
     project_pair_id: int
     source_issue_iid: int
-    target_issue_iid: int = None
+    target_issue_iid: Optional[int] = None
     conflict_type: str
     description: str
     resolved: bool

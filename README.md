@@ -15,6 +15,51 @@ A comprehensive service for synchronizing GitLab issues between different GitLab
 - **Detailed Logging**: Complete audit trail of all sync operations
 - **Issue Linking**: Adds cross-references between synced issues
 
+## Web UI (demo screenshots)
+
+These screenshots are generated from seeded **demo data** (no real tokens; no GitLab calls):
+
+- **Dashboard**:
+
+![Dashboard](docs/screenshots/dashboard.png)
+
+- **GitLab Instances**:
+
+![GitLab Instances](docs/screenshots/instances.png)
+
+- **Project Pairs**:
+
+![Project Pairs](docs/screenshots/project-pairs.png)
+
+- **User Mappings**:
+
+![User Mappings](docs/screenshots/user-mappings.png)
+
+- **Sync Logs**:
+
+![Sync Logs](docs/screenshots/sync-logs.png)
+
+- **Conflicts**:
+
+![Conflicts](docs/screenshots/conflicts.png)
+
+### Demo data included in the screenshots
+
+- **2 GitLab instances**: “Production” + “Development” (fake tokens)
+- **2 project pairs**: one enabled (bi-directional), one disabled (one-way)
+- **2 user mappings**
+- **12 synced issue mappings**
+- **3 sync log entries** (success, conflict, failed)
+- **2 conflicts** (one unresolved, one resolved)
+
+### Regenerating screenshots locally
+
+```bash
+python3 -m pip install -r scripts/requirements-screenshots.txt
+python3 -m playwright install chromium
+python3 scripts/generate_ui_screenshots.py --db ./data/demo_issuebridge.db --out ./docs/screenshots --overwrite
+```
+
 ## Architecture
 
 ### Technology Stack
