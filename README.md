@@ -47,8 +47,8 @@ A comprehensive service for synchronizing GitLab issues between different GitLab
 
 1. **Clone the repository**:
    ```bash
-   git clone <repository-url>
-   cd IssueBridge
+   git clone https://github.com/MrZoller/issue-bridge.git
+   cd issue-bridge
    ```
 
 2. **Start the service**:
@@ -98,8 +98,8 @@ docker-compose exec issuebridge sqlite3 /data/issuebridge.db
 
 1. **Clone the repository**:
    ```bash
-   git clone <repository-url>
-   cd IssueBridge
+   git clone https://github.com/MrZoller/issue-bridge.git
+   cd issue-bridge
    ```
 
 2. **Create virtual environment**:
@@ -368,7 +368,7 @@ docker-compose logs -f issuebridge
 ### Project Structure
 
 ```
-IssueBridge/
+issue-bridge/
 ├── app/
 │   ├── api/              # API endpoints
 │   ├── models/           # Database models
