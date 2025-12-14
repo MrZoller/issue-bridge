@@ -289,6 +289,28 @@ class GitLabClientApiCallTests(unittest.TestCase):
             post_data={},
         )
 
+    def test_iteration_and_epic_http_endpoints(self):
+        from app.services.gitlab_client import GitLabClient
+
+        client = GitLabClient.__new__(GitLabClient)
+        client.gl = Mock()
+        client.gl.http_list = Mock(return_value=[{"id": 1}])
+        client.gl.http_post = Mock(return_value={"ok": True})
+
+        out = client.list_group_iterations(5)
+        self.assertEqual(out, [{"id": 1}])
+        client.gl.http_list.assert_called_with("/groups/5/iterations", query_data={"per_page": 100})
+
+        client.gl.http_list.reset_mock()
+        out2 = client.list_group_epics(6, search="Epic")
+        self.assertEqual(out2, [{"id": 1}])
+        client.gl.http_list.assert_called_with("/groups/6/epics", query_data={"per_page": 100, "search": "Epic"})
+
+        client.gl.http_post.reset_mock()
+        out3 = client.add_issue_to_epic(6, 12, issue_id=99)
+        self.assertEqual(out3, {"ok": True})
+        client.gl.http_post.assert_called_with("/groups/6/epics/12/issues/99", post_data={})
+
 
 if __name__ == "__main__":
     unittest.main()

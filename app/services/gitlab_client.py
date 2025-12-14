@@ -229,6 +229,62 @@ class GitLabClient:
             logger.warning(f"Failed to create milestone: {e}")
             return None
 
+    def get_project_namespace(self, project_id: str) -> Optional[Dict[str, Any]]:
+        """Return project namespace dict (id/kind/full_path) if available."""
+        try:
+            project = self.get_project(project_id)
+            ns = getattr(project, "namespace", None)
+            if ns is None:
+                return None
+            # python-gitlab may return dict or object
+            if isinstance(ns, dict):
+                return ns
+            return {
+                "id": getattr(ns, "id", None),
+                "kind": getattr(ns, "kind", None),
+                "full_path": getattr(ns, "full_path", None),
+            }
+        except Exception as e:
+            logger.warning(f"Failed to get namespace for project {project_id}: {e}")
+            return None
+
+    def list_group_iterations(self, group_id: int) -> List[Dict[str, Any]]:
+        """List iterations for a group (best-effort, returns raw dicts)."""
+        gid = quote(str(int(group_id)), safe="")
+        path = f"/groups/{gid}/iterations"
+        return self._with_retries(lambda: self.gl.http_list(path, query_data={"per_page": 100}))
+
+    def create_group_iteration(self, group_id: int, *, title: str, start_date: str, due_date: str) -> Optional[Dict[str, Any]]:
+        """Create a group iteration (best-effort)."""
+        gid = quote(str(int(group_id)), safe="")
+        path = f"/groups/{gid}/iterations"
+        try:
+            return self._with_retries(
+                lambda: self.gl.http_post(path, post_data={"title": title, "start_date": start_date, "due_date": due_date})
+            )
+        except Exception as e:
+            logger.warning(f"Failed to create iteration '{title}' in group {group_id}: {e}")
+            return None
+
+    def list_group_epics(self, group_id: int, *, search: Optional[str] = None) -> List[Dict[str, Any]]:
+        """List epics for a group (best-effort, returns raw dicts)."""
+        gid = quote(str(int(group_id)), safe="")
+        path = f"/groups/{gid}/epics"
+        query: Dict[str, Any] = {"per_page": 100}
+        if search:
+            query["search"] = search
+        return self._with_retries(lambda: self.gl.http_list(path, query_data=query))
+
+    def add_issue_to_epic(self, group_id: int, epic_iid: int, *, issue_id: int) -> Optional[Dict[str, Any]]:
+        """Link an issue (by numeric issue ID) to an epic (by epic IID)."""
+        gid = quote(str(int(group_id)), safe="")
+        path = f"/groups/{gid}/epics/{int(epic_iid)}/issues/{int(issue_id)}"
+        try:
+            return self._with_retries(lambda: self.gl.http_post(path, post_data={}))
+        except Exception as e:
+            logger.warning(f"Failed to link issue {issue_id} to epic &{epic_iid} in group {group_id}: {e}")
+            return None
+
     def set_issue_time_estimate(self, project_id: str, issue_iid: int, seconds: int) -> Any:
         """Set time estimate for an issue (seconds)."""
         pid = quote(str(project_id), safe="")

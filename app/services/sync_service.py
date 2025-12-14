@@ -282,8 +282,107 @@ class SyncService:
             "milestone": milestone_title,
             "weight": getattr(issue, "weight", None),
             "time_estimate_seconds": _time_estimate_seconds(issue),
+            "issue_type": getattr(issue, "issue_type", None),
+            "iteration": self._safe_attr(getattr(issue, "iteration", None), "title"),
+            "epic": self._safe_attr(getattr(issue, "epic", None), "title") or getattr(issue, "epic_iid", None),
         }
         return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
+
+    def _get_cached_group_id(self, client: GitLabClient, project_id: str) -> Optional[int]:
+        if not hasattr(self, "_project_group_cache"):
+            self._project_group_cache = {}
+        cache: Dict[tuple[int, str], Optional[int]] = getattr(self, "_project_group_cache")
+        key = (id(client), str(project_id))
+        if key in cache:
+            return cache[key]
+        ns = client.get_project_namespace(project_id)
+        gid: Optional[int] = None
+        try:
+            if ns and str(ns.get("kind", "")).lower() == "group" and ns.get("id") is not None:
+                gid = int(ns["id"])
+        except Exception:
+            gid = None
+        cache[key] = gid
+        return gid
+
+    def _extract_iteration(self, issue: Any) -> Optional[Dict[str, Any]]:
+        it = getattr(issue, "iteration", None)
+        if not it:
+            return None
+        if isinstance(it, dict):
+            return it
+        # resource-like
+        return {
+            "id": getattr(it, "id", None),
+            "title": getattr(it, "title", None),
+            "start_date": getattr(it, "start_date", None),
+            "due_date": getattr(it, "due_date", None),
+        }
+
+    def _extract_epic(self, issue: Any) -> Optional[Dict[str, Any]]:
+        epic = getattr(issue, "epic", None)
+        if epic:
+            if isinstance(epic, dict):
+                return epic
+            return {"id": getattr(epic, "id", None), "iid": getattr(epic, "iid", None), "title": getattr(epic, "title", None)}
+        epic_iid = getattr(issue, "epic_iid", None)
+        if epic_iid:
+            return {"iid": epic_iid}
+        return None
+
+    def _map_iteration_id(self, target_client: GitLabClient, target_project_id: str, source_iteration: Dict[str, Any]) -> Optional[int]:
+        title = source_iteration.get("title")
+        if not title:
+            return None
+        group_id = self._get_cached_group_id(target_client, target_project_id)
+        if not group_id:
+            return None
+        try:
+            iterations = target_client.list_group_iterations(group_id)
+        except Exception as e:
+            logger.warning(f"Failed to list iterations for group {group_id}: {e}")
+            return None
+        for it in iterations:
+            if str(it.get("title", "")).strip() == str(title).strip():
+                try:
+                    return int(it["id"])
+                except Exception:
+                    return None
+        # Best-effort create if dates provided
+        start_date = source_iteration.get("start_date")
+        due_date = source_iteration.get("due_date")
+        if start_date and due_date:
+            created = target_client.create_group_iteration(group_id, title=str(title), start_date=str(start_date), due_date=str(due_date))
+            if created and created.get("id") is not None:
+                try:
+                    return int(created["id"])
+                except Exception:
+                    return None
+        return None
+
+    def _map_epic_iid(self, target_client: GitLabClient, target_project_id: str, source_epic: Dict[str, Any]) -> Optional[int]:
+        # Prefer title-based mapping (IIDs differ across instances).
+        title = source_epic.get("title")
+        if not title:
+            return None
+        group_id = self._get_cached_group_id(target_client, target_project_id)
+        if not group_id:
+            return None
+        try:
+            epics = target_client.list_group_epics(group_id, search=str(title))
+        except Exception as e:
+            logger.warning(f"Failed to list epics for group {group_id}: {e}")
+            return None
+        # choose exact title match if possible
+        for e in epics:
+            if str(e.get("title", "")).strip() == str(title).strip():
+                iid = e.get("iid")
+                if iid is not None:
+                    try:
+                        return int(iid)
+                    except Exception:
+                        return None
+        return None
 
     def _add_sync_reference(
         self, description: str, instance_url: str, issue_iid: int, source_project_id: Optional[str] = None
@@ -401,6 +500,10 @@ class SyncService:
             "labels": source_issue.labels if source_issue.labels else [],
         }
 
+        issue_type = getattr(source_issue, "issue_type", None)
+        if issue_type:
+            issue_data["issue_type"] = issue_type
+
         if assignee_ids:
             issue_data["assignee_ids"] = assignee_ids
 
@@ -414,6 +517,13 @@ class SyncService:
         weight = getattr(source_issue, "weight", None)
         if weight is not None:
             issue_data["weight"] = weight
+
+        # Iteration (map by title, best-effort create when possible)
+        iteration = self._extract_iteration(source_issue)
+        if iteration:
+            it_id = self._map_iteration_id(target_client, target_project_id, iteration)
+            if it_id:
+                issue_data["iteration_id"] = it_id
 
         # Create issue
         target_issue = target_client.create_issue(target_project_id, issue_data)
@@ -431,6 +541,17 @@ class SyncService:
             source_issue, target_issue, source_instance,
             target_client, target_project_id, target_instance_id, source_project_id, stats=stats
         )
+
+        # Epic link (best-effort, title-mapped)
+        epic = self._extract_epic(source_issue)
+        if epic and epic.get("title"):
+            epic_iid = self._map_epic_iid(target_client, target_project_id, epic)
+            group_id = self._get_cached_group_id(target_client, target_project_id)
+            if epic_iid and group_id and getattr(target_issue, "id", None):
+                try:
+                    target_client.add_issue_to_epic(group_id, epic_iid, issue_id=int(target_issue.id))
+                except Exception as e:
+                    logger.warning(f"Failed to link epic on created issue #{target_issue.iid}: {e}")
 
         # Close issue if source is closed
         if source_issue.state == "closed":
@@ -722,12 +843,22 @@ class SyncService:
             "assignee_ids": assignee_ids,
         }
 
+        issue_type = getattr(source_issue, "issue_type", None)
+        if issue_type:
+            update_data["issue_type"] = issue_type
+
         # Always set milestone_id/due_date so removals clear target.
         # GitLab often uses milestone_id=0 to clear; treat None as "clear".
         update_data["milestone_id"] = milestone_id if milestone_id is not None else 0
         update_data["due_date"] = getattr(source_issue, "due_date", None)
         # Weight can be null on GitLab; set it explicitly so removals clear.
         update_data["weight"] = getattr(source_issue, "weight", None)
+
+        iteration = self._extract_iteration(source_issue)
+        if iteration:
+            it_id = self._map_iteration_id(target_client, target_project_id, iteration)
+            if it_id:
+                update_data["iteration_id"] = it_id
 
         # Handle state changes
         target_issue = target_client.get_issue(target_project_id, target_issue_iid)
@@ -752,6 +883,17 @@ class SyncService:
             source_issue, target_issue, source_instance,
             target_client, target_project_id, target_instance_id, source_project_id, stats=stats
         )
+
+        # Epic link (best-effort, title-mapped)
+        epic = self._extract_epic(source_issue)
+        if epic and epic.get("title"):
+            epic_iid = self._map_epic_iid(target_client, target_project_id, epic)
+            group_id = self._get_cached_group_id(target_client, target_project_id)
+            if epic_iid and group_id and getattr(target_issue, "id", None):
+                try:
+                    target_client.add_issue_to_epic(group_id, epic_iid, issue_id=int(target_issue.id))
+                except Exception as e:
+                    logger.warning(f"Failed to link epic on updated issue #{target_issue_iid}: {e}")
 
     def _detect_conflict(
         self, synced_issue: SyncedIssue, source_issue: Any, target_issue: Any
