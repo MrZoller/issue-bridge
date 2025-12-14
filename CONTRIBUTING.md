@@ -1,6 +1,6 @@
-# Contributing to GitLabIssueTransferBuddy
+# Contributing to IssueBridge
 
-Thank you for your interest in contributing to GitLabIssueTransferBuddy! We welcome contributions from the community.
+Thank you for your interest in contributing to IssueBridge! We welcome contributions from the community.
 
 ## How to Contribute
 
@@ -40,8 +40,8 @@ We welcome feature requests! Please open an issue with:
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/yourusername/GitLabIssueTransferBuddy.git
-   cd GitLabIssueTransferBuddy
+   git clone https://github.com/yourusername/IssueBridge.git
+   cd IssueBridge
    ```
 
 2. Install dependencies (specific instructions will be added as the project develops)

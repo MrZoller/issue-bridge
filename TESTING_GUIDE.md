@@ -1,4 +1,4 @@
-# GitLab Issue Transfer Buddy - Safe Testing Guide
+# IssueBridge - Safe Testing Guide
 
 This guide provides step-by-step instructions for safely testing the synchronization functionality using test projects, ensuring you don't accidentally affect production data.
 
@@ -101,7 +101,7 @@ For each GitLab instance, create a Personal Access Token with the required permi
    - In the left sidebar, click **"Access Tokens"**
 
 3. **Create a new test token**
-   - **Token name**: `Test - Issue Sync Service` (include "Test" to identify it later)
+   - **Token name**: `Test - IssueBridge` (include "Test" to identify it later)
    - **Expiration date**: 7-14 days (short-lived for testing security)
    - **Select scopes** - Check **all three** boxes:
      - ☑️ `api` (Full API access - required for creating/updating issues, labels, milestones)
@@ -140,7 +140,7 @@ cp .env.example .env.test
 
 ```ini
 # Database - use separate test database
-DATABASE_URL=sqlite:///./test_sync.db
+DATABASE_URL=sqlite:///./test_issuebridge.db
 
 # Server configuration
 HOST=0.0.0.0
@@ -165,9 +165,9 @@ cp docker-compose.yml docker-compose.test.yml
 version: '3.8'
 
 services:
-  sync-app-test:
+  issuebridge-test:
     build: .
-    container_name: gitlab-sync-test
+    container_name: issuebridge-test
     ports:
       - "8001:8000"  # Different port to avoid conflicts
     volumes:
@@ -201,7 +201,7 @@ pip install -r requirements.txt
 3. Set environment variables:
 
 ```bash
-export DATABASE_URL="sqlite:///./test_sync.db"
+export DATABASE_URL="sqlite:///./test_issuebridge.db"
 export HOST="0.0.0.0"
 export PORT="8001"
 export DEFAULT_SYNC_INTERVAL_MINUTES="2"
@@ -220,7 +220,7 @@ Open your browser to:
 - Docker: http://localhost:8001
 - Local: http://localhost:8001
 
-You should see the GitLab Issue Transfer Buddy dashboard.
+You should see the IssueBridge dashboard.
 
 ---
 
@@ -229,7 +229,7 @@ You should see the GitLab Issue Transfer Buddy dashboard.
 Before proceeding with tests, verify:
 
 - [ ] Using dedicated test projects (NOT production projects)
-- [ ] Using test-specific database file (`test_sync.db`)
+- [ ] Using test-specific database file (`test_issuebridge.db`)
 - [ ] Access tokens are for test accounts/projects only
 - [ ] Application running on different port (8001) if production instance exists
 - [ ] Separate Docker volume (`test_data`) if using containers
@@ -535,7 +535,7 @@ After completing tests, verify the following:
 
 ```bash
 # Check application logs
-docker-compose -f docker-compose.test.yml logs -f sync-app-test
+docker-compose -f docker-compose.test.yml logs -f issuebridge-test
 
 # OR if running locally
 tail -f logs/app.log  # (if logs are written to file)
@@ -551,7 +551,7 @@ Look for:
 
 ```bash
 # Connect to test database
-sqlite3 test_sync.db
+sqlite3 test_issuebridge.db
 
 # Check synced issues
 SELECT COUNT(*) FROM synced_issues;
@@ -611,7 +611,7 @@ Ctrl+C (then deactivate virtual environment)
 
 ```bash
 # Remove test database
-rm test_sync.db
+rm test_issuebridge.db
 
 # Remove Docker volume (if used)
 rm -rf test_data/
@@ -715,15 +715,15 @@ curl -X POST http://localhost:8001/api/sync/{pair_id}/trigger
 2. Missing migrations
    - **Fix:** Delete test DB and restart (migrations run automatically)
 3. Corrupt database
-   - **Fix:** Delete `test_sync.db` and restart application
+   - **Fix:** Delete `test_issuebridge.db` and restart application
 
 **Verification:**
 ```bash
 # Check database integrity
-sqlite3 test_sync.db "PRAGMA integrity_check;"
+sqlite3 test_issuebridge.db "PRAGMA integrity_check;"
 
 # Check schema
-sqlite3 test_sync.db ".schema"
+sqlite3 test_issuebridge.db ".schema"
 ```
 
 ### API Connection Errors

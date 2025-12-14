@@ -1,6 +1,6 @@
-# Quick Start Guide
+# IssueBridge Quick Start Guide
 
-Get your GitLab Issue Sync Service up and running in minutes!
+Get IssueBridge up and running in minutes!
 
 ## Method 1: Docker (Recommended)
 
@@ -14,7 +14,7 @@ Get your GitLab Issue Sync Service up and running in minutes!
 
 1. **Start the service**:
    ```bash
-   cd GitLabIssueTransferBuddy
+   cd IssueBridge
    docker-compose up -d
    ```
 
@@ -83,7 +83,7 @@ docker-compose up -d --build
 
 1. **Set up Python environment**:
    ```bash
-   cd GitLabIssueTransferBuddy
+   cd IssueBridge
    python -m venv venv
    source venv/bin/activate  # On Windows: venv\Scripts\activate
    pip install -r requirements.txt
@@ -124,7 +124,7 @@ Your token must have **all three** of these scopes:
    - Click **"Access Tokens"** in the left sidebar
 
 3. **Create a new token**
-   - **Token name**: `GitLab Issue Sync Service` (or any descriptive name)
+   - **Token name**: `IssueBridge` (or any descriptive name)
    - **Expiration date**:
      - Production: 90 days to 1 year
      - Testing: 7-30 days
