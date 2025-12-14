@@ -5,6 +5,7 @@ import json
 import re
 from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime, timezone, timedelta
+from types import SimpleNamespace
 from sqlalchemy.orm import Session
 
 from app.models import (
@@ -270,6 +271,12 @@ class SyncService:
     ) -> str:
         """Add sync reference to issue description"""
         base = self._normalize_instance_url(instance_url)
+        desc = description or ""
+
+        # If an issue marker already exists, don't mutate the description (prevents bidirectional ping-pong).
+        if self._ISSUE_MARKER_RE.search(desc):
+            return desc
+
         marker = ""
         if source_project_id:
             marker = "\n" + self._issue_marker(
@@ -277,10 +284,39 @@ class SyncService:
                 source_project_id=str(source_project_id),
                 source_issue_iid=int(issue_iid),
             )
+
+        # If we already have the human-readable sync reference, just append the marker once (if any).
+        if self._SYNC_REF_RE.search(desc):
+            if marker and marker not in desc:
+                return desc + marker
+            return desc
+
         sync_note = f"\n\n---\n*Synced from: {base}/-/issues/{issue_iid}*{marker}"
-        if sync_note not in (description or ""):
-            return (description or "") + sync_note
-        return description or ""
+        if sync_note not in desc:
+            return desc + sync_note
+        return desc
+
+    def _compute_synced_hash(
+        self, source_issue: Any, *, source_instance_url: str, source_project_id: str
+    ) -> str:
+        """Compute hash for the content we will actually write to the target."""
+        synced_description = self._add_sync_reference(
+            getattr(source_issue, "description", None) or "",
+            source_instance_url,
+            int(source_issue.iid),
+            source_project_id,
+        )
+        proxy = SimpleNamespace(
+            title=getattr(source_issue, "title", ""),
+            description=synced_description,
+            state=getattr(source_issue, "state", "opened"),
+            labels=getattr(source_issue, "labels", []) or [],
+            assignees=getattr(source_issue, "assignees", []) or [],
+            milestone=getattr(source_issue, "milestone", None),
+            due_date=getattr(source_issue, "due_date", None),
+            updated_at=getattr(source_issue, "updated_at", None),
+        )
+        return self._compute_issue_hash(proxy)
 
     def _create_issue_from_source(
         self,
@@ -319,11 +355,12 @@ class SyncService:
             )
 
         # Prepare issue data
+        synced_description = self._add_sync_reference(
+            source_issue.description, source_instance.url, source_issue.iid, source_project_id
+        )
         issue_data = {
             "title": source_issue.title,
-            "description": self._add_sync_reference(
-                source_issue.description, source_instance.url, source_issue.iid, source_project_id
-            ),
+            "description": synced_description,
             "labels": source_issue.labels if source_issue.labels else [],
         }
 
@@ -469,11 +506,12 @@ class SyncService:
             )
 
         # Prepare update data
+        synced_description = self._add_sync_reference(
+            source_issue.description, source_instance.url, source_issue.iid, source_project_id
+        )
         update_data = {
             "title": source_issue.title,
-            "description": self._add_sync_reference(
-                source_issue.description, source_instance.url, source_issue.iid, source_project_id
-            ),
+            "description": synced_description,
             "labels": source_issue.labels if source_issue.labels else [],
             "assignee_ids": assignee_ids,
         }
@@ -741,7 +779,11 @@ class SyncService:
                                 synced_issue.source_issue_iid = recreated.iid
                                 synced_issue.source_issue_id = recreated.id
                             synced_issue.last_synced_at = self._utcnow()
-                            synced_issue.sync_hash = self._compute_issue_hash(source_issue)
+                            synced_issue.sync_hash = self._compute_synced_hash(
+                                source_issue,
+                                source_instance_url=source_instance.url,
+                                source_project_id=source_project_id,
+                            )
                             self.db.commit()
                             stats["updated"] += 1
                             continue
@@ -758,7 +800,11 @@ class SyncService:
                         # Check if source was updated since last sync
                         source_updated = self._parse_gitlab_datetime(source_issue.updated_at)
                         last_synced_at = self._normalize_utc_naive(synced_issue.last_synced_at)
-                        source_hash = self._compute_issue_hash(source_issue)
+                        source_hash = self._compute_synced_hash(
+                            source_issue,
+                            source_instance_url=source_instance.url,
+                            source_project_id=source_project_id,
+                        )
 
                         if synced_issue.sync_hash != source_hash and (last_synced_at is None or source_updated > last_synced_at):
                             # Update target issue
@@ -826,7 +872,11 @@ class SyncService:
 
                         # Create sync record
                         if direction == SyncDirection.SOURCE_TO_TARGET:
-                            source_hash = self._compute_issue_hash(source_issue)
+                            source_hash = self._compute_synced_hash(
+                                source_issue,
+                                source_instance_url=source_instance.url,
+                                source_project_id=source_project_id,
+                            )
                             synced_issue = SyncedIssue(
                                 project_pair_id=project_pair.id,
                                 source_issue_iid=source_issue.iid,
@@ -836,7 +886,11 @@ class SyncService:
                                 sync_hash=source_hash,
                             )
                         else:
-                            source_hash = self._compute_issue_hash(source_issue)
+                            source_hash = self._compute_synced_hash(
+                                source_issue,
+                                source_instance_url=source_instance.url,
+                                source_project_id=source_project_id,
+                            )
                             synced_issue = SyncedIssue(
                                 project_pair_id=project_pair.id,
                                 source_issue_iid=target_issue.iid,
