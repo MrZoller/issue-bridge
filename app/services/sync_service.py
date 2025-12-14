@@ -317,13 +317,24 @@ class SyncService:
         conflict_type: str,
     ):
         """Log a conflict for manual resolution"""
+        # `target_issue` may be missing for some conflict types (deleted/not found/etc).
+        # Logging a conflict should never break the sync run.
+        target_issue_iid = getattr(target_issue, "iid", None)
+        if target_issue_iid is None and synced_issue is not None:
+            # Best-effort: still record the mapped target IID if we know it.
+            target_issue_iid = getattr(synced_issue, "target_issue_iid", None)
+
         conflict = Conflict(
             project_pair_id=project_pair.id,
             synced_issue_id=synced_issue.id if synced_issue else None,
             source_issue_iid=source_issue.iid,
-            target_issue_iid=target_issue.iid if target_issue else None,
+            target_issue_iid=target_issue_iid,
             conflict_type=conflict_type,
-            description=f"Concurrent updates detected on both instances",
+            description=(
+                "Concurrent updates detected on both instances"
+                if conflict_type == "concurrent_update"
+                else f"Conflict detected: {conflict_type}"
+            ),
             source_data=json.dumps({
                 "title": source_issue.title,
                 "state": source_issue.state,
@@ -335,8 +346,13 @@ class SyncService:
                 "updated_at": target_issue.updated_at,
             }) if target_issue else None,
         )
-        self.db.add(conflict)
-        self.db.commit()
+        try:
+            self.db.add(conflict)
+            self.db.commit()
+        except Exception as e:
+            self.db.rollback()
+            logger.error(f"Failed to persist conflict log ({conflict_type}): {e}")
+            return
 
         logger.warning(
             f"Conflict detected: {conflict_type} for source issue #{source_issue.iid}"

@@ -20,7 +20,9 @@ class Conflict(Base):
 
     # Issue information
     source_issue_iid = Column(Integer, nullable=False)
-    target_issue_iid = Column(Integer, nullable=False)
+    # Some conflict types can be logged without a corresponding target issue
+    # (e.g., target issue deleted or not yet created).
+    target_issue_iid = Column(Integer, nullable=True)
 
     # Conflict details
     conflict_type = Column(String, nullable=False)  # e.g., "concurrent_update", "deleted_on_one_side"
