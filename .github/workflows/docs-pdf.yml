@@ -5,10 +5,14 @@ on:
   pull_request:
   push:
     branches: [main]
+  release:
+    types: [published]
 
 jobs:
   build-pdfs:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout
@@ -79,3 +83,9 @@ jobs:
           name: docs-pdfs
           path: docs-pdfs/*.pdf
           if-no-files-found: error
+
+      - name: Attach PDFs to GitHub Release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: docs-pdfs/*.pdf
