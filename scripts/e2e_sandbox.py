@@ -369,7 +369,7 @@ def main() -> int:
             if out2.get("status") not in {"success"}:
                 _die(f"idempotency sync failed: {out2}")
 
-            tgt_issues2 = tgt_project_ref.issues.list(get_all=True, state="all", get_all=True)
+            tgt_issues2 = tgt_project_ref.issues.list(get_all=True, state="all")
             if len(tgt_issues2) != len(tgt_issues):
                 _die(f"expected stable issue count on target; {len(tgt_issues)} -> {len(tgt_issues2)}")
 
@@ -413,6 +413,75 @@ def main() -> int:
             )
             if len(notes4) != len(notes3):
                 _die(f"expected stable note count post-update; {len(notes3)} -> {len(notes4)}")
+
+            # --- Bidirectional phase ---
+            print("[e2e] enabling bidirectional sync…")
+            pair.bidirectional = True
+            db.commit()
+
+            tgt_created = tgt_project_ref.issues.create(  # type: ignore[attr-defined]
+                {
+                    "title": f"E2E created on target ({cfg.run_id})",
+                    "description": "Originated on target in E2E bidirectional phase.",
+                    "labels": "target-created",
+                }
+            )
+            tgt_created_iid = int(getattr(tgt_created, "iid"))
+
+            # Small delay to avoid edge-case timestamp equality around updated_after overlap.
+            time.sleep(1.0)
+            print("[e2e] running bidirectional sync (should copy target -> source)…")
+            out5 = svc.sync_project_pair(pair.id)
+            if out5.get("status") not in {"success"}:
+                _die(f"bidirectional sync failed: {out5}")
+
+            src_project_ref = src_gl.projects.get(src_project_id)
+            src_issues = src_project_ref.issues.list(get_all=True, state="all")
+            mirrored_on_source = next(
+                (i for i in src_issues if f"E2E created on target ({cfg.run_id})" in i.title), None
+            )
+            if mirrored_on_source is None:
+                _die("expected target-created issue to be mirrored onto source in bidirectional mode")
+
+            src_desc = getattr(mirrored_on_source, "description", "") or ""
+            if "*Synced from:" not in src_desc or "gl-issue-sync:" not in src_desc:
+                _die("expected sync reference + marker in source description for target-created issue")
+
+            # Create a comment on the target-created issue; ensure it syncs to source once and doesn't ping-pong back.
+            tgt_created_issue = tgt_project_ref.issues.get(tgt_created_iid)  # type: ignore[attr-defined]
+            tgt_created_issue.notes.create({"body": "note from target (bidirectional)"})  # type: ignore[attr-defined]
+
+            time.sleep(1.0)
+            print("[e2e] syncing target comment to source (no ping-pong)…")
+            out6 = svc.sync_project_pair(pair.id)
+            if out6.get("status") not in {"success"}:
+                _die(f"bidirectional comment sync failed: {out6}")
+
+            src_issue_full = src_project_ref.issues.get(int(getattr(mirrored_on_source, "iid")))  # type: ignore[attr-defined]
+            src_notes = src_issue_full.notes.list(  # type: ignore[attr-defined]
+                get_all=True, per_page=100, order_by="created_at", sort="asc"
+            )
+            if not any("note from target (bidirectional)" in (getattr(n, "body", "") or "") for n in src_notes):
+                _die("expected target note to sync to source in bidirectional mode")
+
+            tgt_notes_after = tgt_created_issue.notes.list(  # type: ignore[attr-defined]
+                get_all=True, per_page=100, order_by="created_at", sort="asc"
+            )
+            if any("note from target (bidirectional)" in (getattr(n, "body", "") or "") and "gl-issue-sync-note:" in (getattr(n, "body", "") or "") for n in tgt_notes_after):
+                _die("unexpected ping-pong: target appears to contain a synced-back note marker")
+
+            # Final idempotency check across both projects.
+            print("[e2e] running final bidirectional idempotency sync…")
+            out7 = svc.sync_project_pair(pair.id)
+            if out7.get("status") not in {"success"}:
+                _die(f"final bidirectional idempotency sync failed: {out7}")
+
+            src_issues2 = src_project_ref.issues.list(get_all=True, state="all")
+            tgt_issues3 = tgt_project_ref.issues.list(get_all=True, state="all")
+            if len(src_issues2) != len(src_issues):
+                _die(f"expected stable issue count on source; {len(src_issues)} -> {len(src_issues2)}")
+            if len(tgt_issues3) != len(tgt_issues2):
+                _die(f"expected stable issue count on target; {len(tgt_issues2)} -> {len(tgt_issues3)}")
 
             # Keep references in locals so linters don't complain about "unused"
             _ = (note1, note2, note3)
