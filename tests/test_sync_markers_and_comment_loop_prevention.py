@@ -7,15 +7,27 @@ class SyncMarkersAndCommentLoopPreventionTests(unittest.TestCase):
     def test_issue_marker_roundtrip(self):
         from app.services.sync_service import SyncService
 
-        marker = SyncService._issue_marker(
+        marker = SyncService._issue_marker_with_fields(
             source_instance_url="https://gitlab.example/",
             source_project_id="group/proj",
             source_issue_iid=123,
+            issue_type="incident",
+            milestone_title="M1",
+            iteration_title="Sprint 1",
+            iteration_start_date="2025-01-01",
+            iteration_due_date="2025-01-14",
+            epic_title="Epic A",
         )
         desc = "hello\n\n---\n*Synced from: https://gitlab.example/-/issues/123*\n" + marker
 
         parsed = SyncService._parse_issue_marker(desc)
         self.assertEqual(parsed, ("https://gitlab.example", "group/proj", 123))
+
+        payload = SyncService._parse_issue_marker_payload(desc)
+        self.assertEqual(payload.get("issue_type"), "incident")
+        self.assertEqual(payload.get("milestone_title"), "M1")
+        self.assertEqual(payload.get("iteration_title"), "Sprint 1")
+        self.assertEqual(payload.get("epic_title"), "Epic A")
 
         ref = SyncService._parse_sync_reference(desc)
         self.assertEqual(ref, ("https://gitlab.example", 123))

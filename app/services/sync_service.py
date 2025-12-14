@@ -95,6 +95,40 @@ class SyncService:
         return f"<!-- gl-issue-sync:{cls._b64_json(payload)} -->"
 
     @classmethod
+    def _issue_marker_with_fields(
+        cls,
+        *,
+        source_instance_url: str,
+        source_project_id: str,
+        source_issue_iid: int,
+        issue_type: Optional[str] = None,
+        milestone_title: Optional[str] = None,
+        iteration_title: Optional[str] = None,
+        iteration_start_date: Optional[str] = None,
+        iteration_due_date: Optional[str] = None,
+        epic_title: Optional[str] = None,
+    ) -> str:
+        payload = {
+            "v": 2,
+            "source_instance_url": cls._normalize_instance_url(source_instance_url),
+            "source_project_id": str(source_project_id),
+            "source_issue_iid": int(source_issue_iid),
+        }
+        if issue_type:
+            payload["issue_type"] = str(issue_type)
+        if milestone_title:
+            payload["milestone_title"] = str(milestone_title)
+        if iteration_title:
+            payload["iteration_title"] = str(iteration_title)
+        if iteration_start_date:
+            payload["iteration_start_date"] = str(iteration_start_date)
+        if iteration_due_date:
+            payload["iteration_due_date"] = str(iteration_due_date)
+        if epic_title:
+            payload["epic_title"] = str(epic_title)
+        return f"<!-- gl-issue-sync:{cls._b64_json(payload)} -->"
+
+    @classmethod
     def _note_marker(
         cls,
         *,
@@ -113,14 +147,19 @@ class SyncService:
         return f"<!-- gl-issue-sync-note:{cls._b64_json(payload)} -->"
 
     @classmethod
-    def _parse_issue_marker(cls, description: Optional[str]) -> Optional[Tuple[str, str, int]]:
-        """Return (source_instance_url, source_project_id, source_issue_iid) if marker found."""
+    @classmethod
+    def _parse_issue_marker_payload(cls, description: Optional[str]) -> Optional[Dict[str, Any]]:
         if not description:
             return None
         m = cls._ISSUE_MARKER_RE.search(description)
         if not m:
             return None
-        data = cls._b64_json_load(m.group("b64"))
+        return cls._b64_json_load(m.group("b64"))
+
+    @classmethod
+    def _parse_issue_marker(cls, description: Optional[str]) -> Optional[Tuple[str, str, int]]:
+        """Return (source_instance_url, source_project_id, source_issue_iid) if marker found."""
+        data = cls._parse_issue_marker_payload(description)
         if not data:
             return None
         try:
@@ -385,7 +424,12 @@ class SyncService:
         return None
 
     def _add_sync_reference(
-        self, description: str, instance_url: str, issue_iid: int, source_project_id: Optional[str] = None
+        self,
+        description: str,
+        instance_url: str,
+        issue_iid: int,
+        source_project_id: Optional[str] = None,
+        marker_fields: Optional[Dict[str, Any]] = None,
     ) -> str:
         """Add sync reference to issue description"""
         base = self._normalize_instance_url(instance_url)
@@ -397,11 +441,24 @@ class SyncService:
 
         marker = ""
         if source_project_id:
-            marker = "\n" + self._issue_marker(
-                source_instance_url=base,
-                source_project_id=str(source_project_id),
-                source_issue_iid=int(issue_iid),
-            )
+            if marker_fields:
+                marker = "\n" + self._issue_marker_with_fields(
+                    source_instance_url=base,
+                    source_project_id=str(source_project_id),
+                    source_issue_iid=int(issue_iid),
+                    issue_type=marker_fields.get("issue_type"),
+                    milestone_title=marker_fields.get("milestone_title"),
+                    iteration_title=marker_fields.get("iteration_title"),
+                    iteration_start_date=marker_fields.get("iteration_start_date"),
+                    iteration_due_date=marker_fields.get("iteration_due_date"),
+                    epic_title=marker_fields.get("epic_title"),
+                )
+            else:
+                marker = "\n" + self._issue_marker(
+                    source_instance_url=base,
+                    source_project_id=str(source_project_id),
+                    source_issue_iid=int(issue_iid),
+                )
 
         # If we already have the human-readable sync reference, just append the marker once (if any).
         if self._SYNC_REF_RE.search(desc):
@@ -418,11 +475,13 @@ class SyncService:
         self, source_issue: Any, *, source_instance_url: str, source_project_id: str
     ) -> str:
         """Compute hash for the content we will actually write to the target."""
+        marker_fields = self._marker_fields_from_issue(source_issue)
         synced_description = self._add_sync_reference(
             getattr(source_issue, "description", None) or "",
             source_instance_url,
             int(source_issue.iid),
             source_project_id,
+            marker_fields=marker_fields,
         )
         proxy = SimpleNamespace(
             title=getattr(source_issue, "title", ""),
@@ -437,6 +496,33 @@ class SyncService:
             updated_at=getattr(source_issue, "updated_at", None),
         )
         return self._compute_issue_hash(proxy)
+
+    def _marker_fields_from_issue(self, issue: Any) -> Dict[str, Any]:
+        """Extract stable, title-based fields to persist in markers."""
+        milestone_title = None
+        try:
+            milestone_title = self._extract_milestone_title(getattr(issue, "milestone", None))
+        except Exception:
+            milestone_title = None
+
+        iteration = self._extract_iteration(issue)
+        epic = self._extract_epic(issue)
+
+        fields: Dict[str, Any] = {}
+        issue_type = getattr(issue, "issue_type", None)
+        if issue_type:
+            fields["issue_type"] = issue_type
+        if milestone_title:
+            fields["milestone_title"] = milestone_title
+        if iteration and iteration.get("title"):
+            fields["iteration_title"] = iteration.get("title")
+            if iteration.get("start_date"):
+                fields["iteration_start_date"] = iteration.get("start_date")
+            if iteration.get("due_date"):
+                fields["iteration_due_date"] = iteration.get("due_date")
+        if epic and epic.get("title"):
+            fields["epic_title"] = epic.get("title")
+        return fields
 
     def _create_issue_from_source(
         self,
@@ -492,7 +578,11 @@ class SyncService:
 
         # Prepare issue data
         synced_description = self._add_sync_reference(
-            source_issue.description, source_instance.url, source_issue.iid, source_project_id
+            source_issue.description,
+            source_instance.url,
+            source_issue.iid,
+            source_project_id,
+            marker_fields=self._marker_fields_from_issue(source_issue),
         )
         issue_data = {
             "title": source_issue.title,
@@ -718,31 +808,131 @@ class SyncService:
         target_by_iid = {i.iid: i for i in target_issues}
 
         pairs: set[tuple[int, int]] = set()
+        marker_payloads: Dict[tuple[str, int], Dict[str, Any]] = {}
 
         # If a SOURCE issue was synced from TARGET, its marker points to TARGET.
         for issue in source_issues:
+            payload = self._parse_issue_marker_payload(getattr(issue, "description", None))
+            if not payload:
+                continue
             marked = self._parse_issue_marker(getattr(issue, "description", None))
             if not marked:
                 continue
             m_url, m_pid, m_iid = marked
             if m_url == target_url and m_pid == str(project_pair.target_project_id):
                 pairs.add((int(issue.iid), int(m_iid)))
+                marker_payloads[("source", int(issue.iid))] = payload
 
         # If a TARGET issue was synced from SOURCE, its marker points to SOURCE.
         for issue in target_issues:
+            payload = self._parse_issue_marker_payload(getattr(issue, "description", None))
+            if not payload:
+                continue
             marked = self._parse_issue_marker(getattr(issue, "description", None))
             if not marked:
                 continue
             m_url, m_pid, m_iid = marked
             if m_url == source_url and m_pid == str(project_pair.source_project_id):
                 pairs.add((int(m_iid), int(issue.iid)))
+                marker_payloads[("target", int(issue.iid))] = payload
 
-        stats = {"created": 0, "skipped_existing": 0, "conflicts": 0}
+        stats = {
+            "created": 0,
+            "skipped_existing": 0,
+            "conflicts": 0,
+            "relationships_applied": 0,
+            "relationships_skipped": 0,
+            "relationships_failed": 0,
+        }
+
+        def _apply_relationships_for_issue(
+            client: GitLabClient,
+            project_id: str,
+            issue_iid: int,
+            issue_id: int,
+            payload: Dict[str, Any],
+        ):
+            # Only apply when the marker actually includes any relationship fields.
+            if not any(k in payload for k in ("issue_type", "milestone_title", "iteration_title", "epic_title")):
+                stats["relationships_skipped"] += 1
+                return
+
+            # Fetch full issue to avoid overwriting existing relationships.
+            issue_obj, rc = client.get_issue_optional(project_id, issue_iid)
+            if issue_obj is None:
+                stats["relationships_skipped"] += 1
+                return
+
+            patch_data: Dict[str, Any] = {}
+
+            # issue_type
+            if payload.get("issue_type") and not getattr(issue_obj, "issue_type", None):
+                patch_data["issue_type"] = payload["issue_type"]
+
+            # milestone
+            if payload.get("milestone_title") and not getattr(issue_obj, "milestone", None):
+                try:
+                    ms_id = self._ensure_milestone(client, project_id, str(payload["milestone_title"]))
+                    if ms_id:
+                        patch_data["milestone_id"] = ms_id
+                except Exception:
+                    pass
+
+            # iteration
+            if payload.get("iteration_title") and not getattr(issue_obj, "iteration", None):
+                it = {
+                    "title": payload.get("iteration_title"),
+                    "start_date": payload.get("iteration_start_date"),
+                    "due_date": payload.get("iteration_due_date"),
+                }
+                try:
+                    it_id = self._map_iteration_id(client, project_id, it)
+                    if it_id:
+                        patch_data["iteration_id"] = it_id
+                except Exception:
+                    pass
+
+            if patch_data:
+                try:
+                    client.update_issue(project_id, issue_iid, patch_data)
+                except Exception:
+                    stats["relationships_failed"] += 1
+                    return
+
+            # epic link
+            if payload.get("epic_title") and not getattr(issue_obj, "epic", None) and issue_id:
+                try:
+                    epic_iid = self._map_epic_iid(client, project_id, {"title": payload.get("epic_title")})
+                    group_id = self._get_cached_group_id(client, project_id)
+                    if epic_iid and group_id:
+                        client.add_issue_to_epic(group_id, epic_iid, issue_id=int(issue_id))
+                except Exception:
+                    stats["relationships_failed"] += 1
+                    return
+
+            stats["relationships_applied"] += 1
 
         for source_iid, target_iid in sorted(pairs):
             # Exact match exists
             if self._find_synced_issue_by_pair(project_pair.id, source_iid, target_iid):
                 stats["skipped_existing"] += 1
+                # Still best-effort repair relationships from markers.
+                if ("source", source_iid) in marker_payloads:
+                    _apply_relationships_for_issue(
+                        source_client,
+                        project_pair.source_project_id,
+                        source_iid,
+                        int(getattr(source_by_iid.get(source_iid), "id", 0) or 0),
+                        marker_payloads[("source", source_iid)],
+                    )
+                if ("target", target_iid) in marker_payloads:
+                    _apply_relationships_for_issue(
+                        target_client,
+                        project_pair.target_project_id,
+                        target_iid,
+                        int(getattr(target_by_iid.get(target_iid), "id", 0) or 0),
+                        marker_payloads[("target", target_iid)],
+                    )
                 continue
 
             # Any mapping exists for either side => conflict
@@ -775,6 +965,24 @@ class SyncService:
                 stats["created"] += 1
             else:
                 stats["conflicts"] += 1
+
+            # Best-effort relationship repair after mapping is in place.
+            if ("source", source_iid) in marker_payloads:
+                _apply_relationships_for_issue(
+                    source_client,
+                    project_pair.source_project_id,
+                    source_iid,
+                    int(getattr(source_issue, "id", 0) or 0),
+                    marker_payloads[("source", source_iid)],
+                )
+            if ("target", target_iid) in marker_payloads:
+                _apply_relationships_for_issue(
+                    target_client,
+                    project_pair.target_project_id,
+                    target_iid,
+                    int(getattr(target_issue, "id", 0) or 0),
+                    marker_payloads[("target", target_iid)],
+                )
 
         return {"status": "success", "stats": stats, "pairs_found": len(pairs)}
 
@@ -834,7 +1042,11 @@ class SyncService:
 
         # Prepare update data
         synced_description = self._add_sync_reference(
-            source_issue.description, source_instance.url, source_issue.iid, source_project_id
+            source_issue.description,
+            source_instance.url,
+            source_issue.iid,
+            source_project_id,
+            marker_fields=self._marker_fields_from_issue(source_issue),
         )
         update_data = {
             "title": source_issue.title,
