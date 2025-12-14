@@ -1,8 +1,8 @@
 # IssueBridge
 
-[![tests](https://github.com/MrZoller/issue-bridge/actions/workflows/tests.yml/badge.svg)](https://github.com/MrZoller/issue-bridge/actions/workflows/tests.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Python: 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
+[![tests](https://img.shields.io/github/actions/workflow/status/MrZoller/issue-bridge/tests.yml.png?branch=main&label=tests)](https://github.com/MrZoller/issue-bridge/actions/workflows/tests.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.png)](LICENSE)
+[![Python: 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.png)](https://www.python.org/)
 
 A comprehensive service for synchronizing GitLab issues between different GitLab instances. This tool is perfect for organizations that maintain mirrors of their repositories across multiple GitLab instances and need to keep issues in sync.
 
