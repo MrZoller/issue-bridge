@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GitLab Issue Sync Service</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>GitLab Issue Sync Service</h1>
+            <p class="subtitle">Synchronize issues between GitLab instances</p>
+        </header>
+
+        <nav>
+            <div class="nav-tabs">
+                <button class="nav-tab active" data-tab="dashboard-tab" onclick="showTab('dashboard-tab')">Dashboard</button>
+                <button class="nav-tab" data-tab="instances-tab" onclick="showTab('instances-tab')">GitLab Instances</button>
+                <button class="nav-tab" data-tab="pairs-tab" onclick="showTab('pairs-tab')">Project Pairs</button>
+                <button class="nav-tab" data-tab="mappings-tab" onclick="showTab('mappings-tab')">User Mappings</button>
+                <button class="nav-tab" data-tab="logs-tab" onclick="showTab('logs-tab')">Sync Logs</button>
+                <button class="nav-tab" data-tab="conflicts-tab" onclick="showTab('conflicts-tab')">Conflicts</button>
+            </div>
+        </nav>
+
+        <!-- Dashboard Tab -->
+        <div id="dashboard-tab" class="tab-content active">
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-value" id="total-pairs">0</div>
+                    <div class="stat-label">Total Project Pairs</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="active-pairs">0</div>
+                    <div class="stat-label">Active Pairs</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="synced-issues">0</div>
+                    <div class="stat-label">Synced Issues</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="unresolved-conflicts">0</div>
+                    <div class="stat-label">Unresolved Conflicts</div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>Project Pairs Status</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Status</th>
+                            <th>Direction</th>
+                            <th>Synced Issues</th>
+                            <th>Conflicts</th>
+                            <th>Last Sync</th>
+                            <th>Last Status</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="pairs-status-tbody">
+                        <tr><td colspan="8" class="loading">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="card">
+                <h2>Recent Activity</h2>
+                <div id="recent-activity" class="activity-log">
+                    <div class="loading">Loading...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- GitLab Instances Tab -->
+        <div id="instances-tab" class="tab-content">
+            <div class="card">
+                <h2>Add GitLab Instance</h2>
+                <form id="instance-form">
+                    <div class="grid-2">
+                        <div class="form-group">
+                            <label for="instance-name">Name *</label>
+                            <input type="text" id="instance-name" name="name" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="instance-url">URL *</label>
+                            <input type="url" id="instance-url" name="url" placeholder="https://gitlab.example.com" required>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="instance-token">Access Token *</label>
+                        <input type="password" id="instance-token" name="access_token" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="instance-description">Description</label>
+                        <textarea id="instance-description" name="description" rows="2"></textarea>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Add Instance</button>
+                </form>
+            </div>
+
+            <div class="card">
+                <h2>GitLab Instances</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>URL</th>
+                            <th>Description</th>
+                            <th>Created</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="instances-tbody">
+                        <tr><td colspan="5" class="loading">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Project Pairs Tab -->
+        <div id="pairs-tab" class="tab-content">
+            <div class="card">
+                <h2>Add Project Pair</h2>
+                <form id="pair-form">
+                    <div class="form-group">
+                        <label for="pair-name">Name *</label>
+                        <input type="text" id="pair-name" name="name" required>
+                    </div>
+
+                    <div class="grid-2">
+                        <div class="form-group">
+                            <label for="source-instance">Source Instance *</label>
+                            <select id="source-instance" name="source_instance_id" required>
+                                <option value="">Select instance...</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="source-project">Source Project ID/Path *</label>
+                            <input type="text" id="source-project" name="source_project_id" placeholder="group/project or 123" required>
+                        </div>
+                    </div>
+
+                    <div class="grid-2">
+                        <div class="form-group">
+                            <label for="target-instance">Target Instance *</label>
+                            <select id="target-instance" name="target_instance_id" required>
+                                <option value="">Select instance...</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="target-project">Target Project ID/Path *</label>
+                            <input type="text" id="target-project" name="target_project_id" placeholder="group/project or 123" required>
+                        </div>
+                    </div>
+
+                    <div class="grid-2">
+                        <div class="form-group">
+                            <label for="sync-interval">Sync Interval (minutes) *</label>
+                            <input type="number" id="sync-interval" name="sync_interval_minutes" value="10" min="1" required>
+                        </div>
+                        <div class="form-group">
+                            <div class="checkbox-group">
+                                <input type="checkbox" id="bidirectional" name="bidirectional" checked>
+                                <label for="bidirectional">Bidirectional Sync</label>
+                            </div>
+                            <div class="checkbox-group">
+                                <input type="checkbox" id="sync-enabled" name="sync_enabled" checked>
+                                <label for="sync-enabled">Sync Enabled</label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary">Add Project Pair</button>
+                </form>
+            </div>
+
+            <div class="card">
+                <h2>Project Pairs</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Source</th>
+                            <th>Target</th>
+                            <th>Direction</th>
+                            <th>Status</th>
+                            <th>Interval</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="pairs-tbody">
+                        <tr><td colspan="7" class="loading">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- User Mappings Tab -->
+        <div id="mappings-tab" class="tab-content">
+            <div class="card">
+                <h2>Add User Mapping</h2>
+                <form id="mapping-form">
+                    <div class="grid-2">
+                        <div class="form-group">
+                            <label for="source-mapping-instance">Source Instance *</label>
+                            <select id="source-mapping-instance" name="source_instance_id" required>
+                                <option value="">Select instance...</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="source-username">Source Username *</label>
+                            <input type="text" id="source-username" name="source_username" required>
+                        </div>
+                    </div>
+
+                    <div class="grid-2">
+                        <div class="form-group">
+                            <label for="target-mapping-instance">Target Instance *</label>
+                            <select id="target-mapping-instance" name="target_instance_id" required>
+                                <option value="">Select instance...</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="target-username">Target Username *</label>
+                            <input type="text" id="target-username" name="target_username" required>
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary">Add User Mapping</button>
+                </form>
+            </div>
+
+            <div class="card">
+                <h2>User Mappings</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Source Instance</th>
+                            <th>Source Username</th>
+                            <th>Target Instance</th>
+                            <th>Target Username</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="mappings-tbody">
+                        <tr><td colspan="5" class="loading">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Sync Logs Tab -->
+        <div id="logs-tab" class="tab-content">
+            <div class="card">
+                <h2>Sync Logs</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Project Pair</th>
+                            <th>Status</th>
+                            <th>Direction</th>
+                            <th>Source Issue</th>
+                            <th>Target Issue</th>
+                            <th>Message</th>
+                        </tr>
+                    </thead>
+                    <tbody id="logs-tbody">
+                        <tr><td colspan="7" class="loading">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Conflicts Tab -->
+        <div id="conflicts-tab" class="tab-content">
+            <div class="card">
+                <h2>Conflicts</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Project Pair</th>
+                            <th>Source Issue</th>
+                            <th>Target Issue</th>
+                            <th>Type</th>
+                            <th>Status</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="conflicts-tbody">
+                        <tr><td colspan="7" class="loading">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
