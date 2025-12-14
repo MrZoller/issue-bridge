@@ -16,6 +16,8 @@ class SyncScheduler:
 
     def __init__(self):
         self.scheduler = BackgroundScheduler()
+        # Best-effort in-memory index of jobs we created.
+        # APScheduler itself is the source of truth (see get_job()).
         self.jobs = {}
 
     def start(self):
@@ -35,8 +37,23 @@ class SyncScheduler:
         """Schedule sync jobs for all enabled project pairs"""
         db = SessionLocal()
         try:
-            pairs = db.query(ProjectPair).filter(ProjectPair.sync_enabled == True).all()
-            for pair in pairs:
+            enabled_pairs = (
+                db.query(ProjectPair).filter(ProjectPair.sync_enabled == True).all()
+            )
+            enabled_ids = {p.id for p in enabled_pairs}
+
+            # If this is ever re-run, reconcile existing jobs too.
+            for job_id in list(self.jobs.keys()):
+                if not job_id.startswith("sync_pair_"):
+                    continue
+                try:
+                    pair_id = int(job_id.split("sync_pair_", 1)[1])
+                except Exception:
+                    continue
+                if pair_id not in enabled_ids:
+                    self.unschedule_pair(pair_id)
+
+            for pair in enabled_pairs:
                 self.schedule_pair(pair.id, pair.sync_interval_minutes)
         finally:
             db.close()
@@ -45,8 +62,9 @@ class SyncScheduler:
         """Schedule sync job for a specific project pair"""
         job_id = f"sync_pair_{pair_id}"
 
-        # Remove existing job if it exists
-        if job_id in self.jobs:
+        # Remove existing job if it exists (don't rely solely on self.jobs)
+        existing = self.scheduler.get_job(job_id)
+        if existing is not None:
             self.scheduler.remove_job(job_id)
 
         # Add new job
@@ -63,13 +81,14 @@ class SyncScheduler:
     def unschedule_pair(self, pair_id: int):
         """Remove sync job for a project pair"""
         job_id = f"sync_pair_{pair_id}"
-        if job_id in self.jobs:
-            try:
+        try:
+            existing = self.scheduler.get_job(job_id)
+            if existing is not None:
                 self.scheduler.remove_job(job_id)
-                del self.jobs[job_id]
-                logger.info(f"Unscheduled sync for pair {pair_id}")
-            except Exception as e:
-                logger.error(f"Failed to unschedule pair {pair_id}: {e}")
+            self.jobs.pop(job_id, None)
+            logger.info(f"Unscheduled sync for pair {pair_id}")
+        except Exception as e:
+            logger.error(f"Failed to unschedule pair {pair_id}: {e}")
 
     def _sync_pair_job(self, pair_id: int):
         """Job function to sync a project pair"""

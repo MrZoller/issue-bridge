@@ -7,6 +7,7 @@ from datetime import datetime
 
 from app.models.base import get_db
 from app.models import ProjectPair
+from app.scheduler import scheduler
 
 router = APIRouter(prefix="/api/project-pairs", tags=["project-pairs"])
 
@@ -59,6 +60,10 @@ def create_project_pair(pair: ProjectPairCreate, db: Session = Depends(get_db)):
     db.add(db_pair)
     db.commit()
     db.refresh(db_pair)
+
+    # Schedule immediately if enabled
+    if db_pair.sync_enabled:
+        scheduler.schedule_pair(db_pair.id, db_pair.sync_interval_minutes)
     return db_pair
 
 
@@ -85,6 +90,12 @@ def update_project_pair(
 
     db.commit()
     db.refresh(db_pair)
+
+    # Reconcile scheduler with latest DB state
+    if db_pair.sync_enabled:
+        scheduler.schedule_pair(db_pair.id, db_pair.sync_interval_minutes)
+    else:
+        scheduler.unschedule_pair(db_pair.id)
     return db_pair
 
 
@@ -95,6 +106,8 @@ def delete_project_pair(pair_id: int, db: Session = Depends(get_db)):
     if not pair:
         raise HTTPException(status_code=404, detail="Project pair not found")
 
+    # Ensure any scheduled job is removed
+    scheduler.unschedule_pair(pair_id)
     db.delete(pair)
     db.commit()
     return {"message": "Project pair deleted successfully"}
@@ -110,4 +123,10 @@ def toggle_sync(pair_id: int, db: Session = Depends(get_db)):
     pair.sync_enabled = not pair.sync_enabled
     db.commit()
     db.refresh(pair)
+
+    # Apply scheduling change immediately
+    if pair.sync_enabled:
+        scheduler.schedule_pair(pair.id, pair.sync_interval_minutes)
+    else:
+        scheduler.unschedule_pair(pair.id)
     return pair
