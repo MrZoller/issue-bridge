@@ -47,6 +47,25 @@ class SyncService:
         dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
         return cls._normalize_utc_naive(dt)
 
+    @staticmethod
+    def _safe_attr(obj: Any, name: str, default: Any = None) -> Any:
+        """Get attribute or dict key safely."""
+        if obj is None:
+            return default
+        if isinstance(obj, dict):
+            return obj.get(name, default)
+        return getattr(obj, name, default)
+
+    @classmethod
+    def _extract_username(cls, user: Any) -> Optional[str]:
+        """Extract username from a GitLab user-ish object (dict or resource)."""
+        return cls._safe_attr(user, "username")
+
+    @classmethod
+    def _extract_milestone_title(cls, milestone: Any) -> Optional[str]:
+        """Extract milestone title from dict or resource."""
+        return cls._safe_attr(milestone, "title")
+
     def _get_client(self, instance_id: int) -> GitLabClient:
         """Get or create GitLab client for instance"""
         if instance_id not in self.clients:
@@ -132,12 +151,15 @@ class SyncService:
         target_client: GitLabClient,
         target_project_id: str,
         target_instance_id: int,
+        source_project_id: str,
     ) -> Any:
         """Create a new issue in target from source issue"""
         # Map assignees
         assignee_ids = []
         if hasattr(source_issue, 'assignees') and source_issue.assignees:
-            assignee_usernames = [a['username'] for a in source_issue.assignees]
+            assignee_usernames = [
+                u for u in (self._extract_username(a) for a in source_issue.assignees) if u
+            ]
             mapped_usernames = self._map_usernames(
                 assignee_usernames, source_instance.id, target_instance_id
             )
@@ -153,8 +175,9 @@ class SyncService:
         # Ensure milestone exists
         milestone_id = None
         if hasattr(source_issue, 'milestone') and source_issue.milestone:
+            milestone_title = self._extract_milestone_title(source_issue.milestone)
             milestone_id = self._ensure_milestone(
-                target_client, target_project_id, source_issue.milestone['title']
+                target_client, target_project_id, milestone_title
             )
 
         # Prepare issue data
@@ -181,7 +204,7 @@ class SyncService:
         # Sync comments
         self._sync_comments(
             source_issue, target_issue, source_instance,
-            target_client, target_project_id, target_instance_id
+            target_client, target_project_id, target_instance_id, source_project_id
         )
 
         # Close issue if source is closed
@@ -198,17 +221,22 @@ class SyncService:
         target_client: GitLabClient,
         target_project_id: str,
         target_instance_id: int,
+        source_project_id: Optional[str] = None,
     ):
         """Sync comments from source to target issue"""
         try:
             source_client = self._get_client(source_instance.id)
+            # Prefer explicit project id/path; fall back to issue.project_id if present.
+            source_pid = source_project_id or (str(source_issue.project_id) if hasattr(source_issue, "project_id") else None)
+            if not source_pid:
+                raise ValueError("Missing source project id for comment sync")
             source_notes = source_client.get_issue_notes(
-                str(source_issue.project_id), source_issue.iid
+                source_pid, source_issue.iid
             )
 
             # Get existing target notes to avoid duplicates
             target_notes = target_client.get_issue_notes(target_project_id, target_issue.iid)
-            existing_note_bodies = {note.body for note in target_notes}
+            existing_note_bodies = {note.body for note in target_notes if getattr(note, "body", None)}
 
             for note in source_notes:
                 # Skip system notes
@@ -216,7 +244,8 @@ class SyncService:
                     continue
 
                 # Format note with author attribution
-                author_note = f"**Comment by @{note.author['username']}:**\n\n{note.body}"
+                author = self._extract_username(getattr(note, "author", None)) or "unknown"
+                author_note = f"**Comment by @{author}:**\n\n{note.body}"
 
                 # Skip if already synced
                 if author_note in existing_note_bodies:
@@ -235,12 +264,16 @@ class SyncService:
         target_client: GitLabClient,
         target_project_id: str,
         target_instance_id: int,
+        source_project_id: str,
     ):
         """Update existing target issue from source"""
         # Map assignees
-        assignee_ids = []
+        # Always set assignee_ids so removals on source clear target.
+        assignee_ids: List[int] = []
         if hasattr(source_issue, 'assignees') and source_issue.assignees:
-            assignee_usernames = [a['username'] for a in source_issue.assignees]
+            assignee_usernames = [
+                u for u in (self._extract_username(a) for a in source_issue.assignees) if u
+            ]
             mapped_usernames = self._map_usernames(
                 assignee_usernames, source_instance.id, target_instance_id
             )
@@ -256,8 +289,9 @@ class SyncService:
         # Ensure milestone exists
         milestone_id = None
         if hasattr(source_issue, 'milestone') and source_issue.milestone:
+            milestone_title = self._extract_milestone_title(source_issue.milestone)
             milestone_id = self._ensure_milestone(
-                target_client, target_project_id, source_issue.milestone['title']
+                target_client, target_project_id, milestone_title
             )
 
         # Prepare update data
@@ -267,16 +301,12 @@ class SyncService:
                 source_issue.description, source_instance.url, source_issue.iid
             ),
             "labels": source_issue.labels if source_issue.labels else [],
+            "assignee_ids": assignee_ids,
         }
 
-        if assignee_ids:
-            update_data["assignee_ids"] = assignee_ids
-
-        if milestone_id:
-            update_data["milestone_id"] = milestone_id
-
-        if hasattr(source_issue, 'due_date') and source_issue.due_date:
-            update_data["due_date"] = source_issue.due_date
+        # Always set milestone_id/due_date so removals clear target.
+        update_data["milestone_id"] = milestone_id
+        update_data["due_date"] = getattr(source_issue, "due_date", None)
 
         # Handle state changes
         target_issue = target_client.get_issue(target_project_id, target_issue_iid)
@@ -289,7 +319,7 @@ class SyncService:
         # Sync new comments
         self._sync_comments(
             source_issue, target_issue, source_instance,
-            target_client, target_project_id, target_instance_id
+            target_client, target_project_id, target_instance_id, source_project_id
         )
 
     def _detect_conflict(
@@ -500,7 +530,25 @@ class SyncService:
                         # Issue already synced, check for updates
                         target_issue_iid = (synced_issue.target_issue_iid if direction == SyncDirection.SOURCE_TO_TARGET
                                            else synced_issue.source_issue_iid)
-                        target_issue = target_client.get_issue(target_project_id, target_issue_iid)
+                        target_issue = target_client.get_issue_or_none(target_project_id, target_issue_iid)
+                        if target_issue is None:
+                            # Target-side issue was deleted or became inaccessible; recreate it and
+                            # repair the mapping so future syncs are consistent.
+                            recreated = self._create_issue_from_source(
+                                source_issue, source_instance, target_client,
+                                target_project_id, target_instance.id, source_project_id
+                            )
+                            if direction == SyncDirection.SOURCE_TO_TARGET:
+                                synced_issue.target_issue_iid = recreated.iid
+                                synced_issue.target_issue_id = recreated.id
+                            else:
+                                synced_issue.source_issue_iid = recreated.iid
+                                synced_issue.source_issue_id = recreated.id
+                            synced_issue.last_synced_at = self._utcnow()
+                            synced_issue.sync_hash = self._compute_issue_hash(source_issue)
+                            self.db.commit()
+                            stats["updated"] += 1
+                            continue
 
                         # Detect conflicts
                         if self._detect_conflict(synced_issue, source_issue, target_issue):
@@ -518,7 +566,7 @@ class SyncService:
                             # Update target issue
                             self._update_issue_from_source(
                                 source_issue, target_issue_iid, source_instance,
-                                target_client, target_project_id, target_instance.id
+                                target_client, target_project_id, target_instance.id, source_project_id
                             )
                             synced_issue.last_synced_at = self._utcnow()
                             synced_issue.sync_hash = self._compute_issue_hash(source_issue)
@@ -530,7 +578,7 @@ class SyncService:
                         # New issue, create in target
                         target_issue = self._create_issue_from_source(
                             source_issue, source_instance, target_client,
-                            target_project_id, target_instance.id
+                            target_project_id, target_instance.id, source_project_id
                         )
 
                         # Create sync record
@@ -557,6 +605,11 @@ class SyncService:
                         stats["created"] += 1
 
                 except Exception as e:
+                    # Ensure a single issue failure doesn't poison the session for the rest of the run.
+                    try:
+                        self.db.rollback()
+                    except Exception:
+                        pass
                     logger.error(f"Failed to sync issue #{source_issue.iid}: {e}")
                     stats["errors"] += 1
                     self._log_sync(

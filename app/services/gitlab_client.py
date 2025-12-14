@@ -28,11 +28,14 @@ class GitLabClient:
         """Get all issues from a project"""
         try:
             project = self.get_project(project_id)
-            params = {"order_by": "updated_at", "sort": "desc"}
+            # Important defaults:
+            # - GitLab defaults to state=opened; we must include closed issues for correct syncing.
+            # - Use get_all=True for proper pagination across python-gitlab versions.
+            params = {"order_by": "updated_at", "sort": "desc", "state": "all", "per_page": 100}
             if updated_after:
                 params["updated_after"] = updated_after.isoformat()
 
-            issues = project.issues.list(all=True, **params)
+            issues = project.issues.list(get_all=True, **params)
             return issues
         except Exception as e:
             logger.error(f"Failed to get issues for project {project_id}: {e}")
@@ -45,6 +48,15 @@ class GitLabClient:
             return project.issues.get(issue_iid)
         except gitlab.exceptions.GitlabGetError as e:
             logger.error(f"Failed to get issue {issue_iid} from project {project_id}: {e}")
+            raise
+
+    def get_issue_or_none(self, project_id: str, issue_iid: int) -> Optional[Any]:
+        """Get a specific issue by IID, returning None on 404."""
+        try:
+            return self.get_issue(project_id, issue_iid)
+        except gitlab.exceptions.GitlabGetError as e:
+            if getattr(e, "response_code", None) == 404:
+                return None
             raise
 
     def create_issue(self, project_id: str, issue_data: Dict[str, Any]) -> Any:
