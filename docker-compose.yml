@@ -1,15 +1,15 @@
 version: '3.8'
 
 services:
-  gitlab-sync:
+  issuebridge:
     build: .
-    container_name: gitlab-issue-sync
+    container_name: issuebridge
     ports:
       - "8000:8000"
     volumes:
       - ./data:/data
     environment:
-      - DATABASE_URL=sqlite:////data/gitlab_sync.db
+      - DATABASE_URL=sqlite:////data/issuebridge.db
       - HOST=0.0.0.0
       - PORT=8000
       - DEFAULT_SYNC_INTERVAL_MINUTES=10
