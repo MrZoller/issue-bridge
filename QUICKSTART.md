@@ -6,7 +6,9 @@ Get your GitLab Issue Sync Service up and running in minutes!
 
 ### Prerequisites
 - Docker and Docker Compose installed on your system
-- GitLab personal access tokens for each instance you want to sync
+- **GitLab Personal Access Tokens** for each instance you want to sync
+  - Must have scopes: `api`, `read_api`, `write_repository`
+  - See [Getting GitLab Access Tokens](#getting-gitlab-access-tokens) section below for step-by-step instructions
 
 ### Steps
 
@@ -73,6 +75,9 @@ docker-compose up -d --build
 ### Prerequisites
 - Python 3.11 or higher
 - pip
+- **GitLab Personal Access Tokens** for each instance you want to sync
+  - Must have scopes: `api`, `read_api`, `write_repository`
+  - See [Getting GitLab Access Tokens](#getting-gitlab-access-tokens) section below for step-by-step instructions
 
 ### Steps
 
@@ -96,17 +101,53 @@ docker-compose up -d --build
 
 ## Getting GitLab Access Tokens
 
-For each GitLab instance:
+For each GitLab instance you want to sync, you need to create a Personal Access Token.
 
-1. Log into GitLab
-2. Go to User Settings (click your avatar → Settings)
-3. Navigate to "Access Tokens" in the left sidebar
-4. Create a new token:
-   - Name: `Issue Sync Service`
-   - Expiration: Set as needed
-   - Scopes: Select `api`
-5. Click "Create personal access token"
-6. **Copy the token immediately** (you won't see it again!)
+### Required Token Scopes
+
+Your token must have **all three** of these scopes:
+- ✅ **`api`** - Full API access
+- ✅ **`read_api`** - Read API access
+- ✅ **`write_repository`** - Write access for creating issues
+
+### Step-by-Step Token Creation
+
+**For GitLab.com or Self-Hosted GitLab:**
+
+1. **Log into your GitLab instance**
+   - GitLab.com: https://gitlab.com
+   - Self-hosted: Your instance URL
+
+2. **Navigate to Access Tokens**
+   - Click your **avatar** (profile picture) in the top-right corner
+   - Select **"Settings"**
+   - Click **"Access Tokens"** in the left sidebar
+
+3. **Create a new token**
+   - **Token name**: `GitLab Issue Sync Service` (or any descriptive name)
+   - **Expiration date**:
+     - Production: 90 days to 1 year
+     - Testing: 7-30 days
+   - **Scopes** - Check **all three** boxes:
+     - ☑️ `api`
+     - ☑️ `read_api`
+     - ☑️ `write_repository`
+
+4. **Generate and save the token**
+   - Click **"Create personal access token"**
+   - ⚠️ **CRITICAL**: Copy the token **immediately**
+   - You will **never see this token again** after leaving the page
+   - Save it in a password manager or secure location
+
+5. **Use the token in the application**
+   - When adding a GitLab instance, paste this token in the "Access Token" field
+
+### Security Notes
+
+- 🔒 Never share tokens or commit them to version control
+- 🔄 Set expiration dates and rotate tokens periodically
+- 🗄️ The application stores tokens securely in its database
+- 👥 For production, consider using a dedicated service account
 
 ## Common Use Cases
 
