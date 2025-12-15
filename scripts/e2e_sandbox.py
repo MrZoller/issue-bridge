@@ -38,10 +38,17 @@ import time
 import uuid
 from dataclasses import dataclass
 from datetime import date, timedelta
+from pathlib import Path
 from typing import NoReturn, Optional
 from urllib.parse import quote
 
 import gitlab
+
+# Ensure the repository root is on sys.path so `import app.*` works when this file is
+# executed as a script (e.g. `python scripts/e2e_sandbox.py` in CI).
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 
 def _die(msg: str) -> NoReturn:
