@@ -38,10 +38,17 @@ import time
 import uuid
 from dataclasses import dataclass
 from datetime import date, timedelta
+from pathlib import Path
 from typing import NoReturn, Optional
 from urllib.parse import quote
 
 import gitlab
+
+# Ensure the repository root is on sys.path so `import app.*` works when this file is
+# executed as a script (e.g. `python scripts/e2e_sandbox.py` in CI).
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 
 def _die(msg: str) -> NoReturn:
@@ -221,6 +228,15 @@ def main() -> int:
     cfg = _load_config()
     print(f"[e2e] run_id={cfg.run_id}")
 
+    def _synced_note_count(notes: list[object]) -> int:
+        """Count only notes created by IssueBridge (marker-based, ignores GitLab system notes)."""
+        count = 0
+        for n in notes:
+            body = getattr(n, "body", "") or ""
+            if "gl-issue-sync-note:" in body:
+                count += 1
+        return count
+
     src_gl = _gitlab(cfg.source.url, cfg.source.token)
     tgt_gl = _gitlab(cfg.target.url, cfg.target.token)
 
@@ -346,9 +362,9 @@ def main() -> int:
 
             # Verify target has issues + markers
             tgt_project_ref = tgt_gl.projects.get(tgt_project_id)
-            tgt_issues = tgt_project_ref.issues.list(
-                get_all=True, state="all", order_by="iid", sort="asc"
-            )
+            # GitLab API does not support order_by=iid; sort client-side for determinism.
+            tgt_issues = tgt_project_ref.issues.list(get_all=True, state="all")
+            tgt_issues = sorted(tgt_issues, key=lambda i: int(getattr(i, "iid", 0) or 0))
             if len(tgt_issues) < 2:
                 _die(f"expected >=2 issues on target, found {len(tgt_issues)}")
 
@@ -384,9 +400,10 @@ def main() -> int:
             notes = tgt_project_ref.issues.get(int(mirrored.iid)).notes.list(  # type: ignore[attr-defined]
                 get_all=True, per_page=100, order_by="created_at", sort="asc"
             )
-            if len(notes) < 2:
-                _die(f"expected >=2 synced notes on target, found {len(notes)}")
-            if not any("gl-issue-sync-note:" in (getattr(n, "body", "") or "") for n in notes):
+            synced_notes = _synced_note_count(notes)
+            if synced_notes < 2:
+                _die(f"expected >=2 synced notes on target, found {synced_notes}")
+            if synced_notes == 0:
                 _die("expected at least one synced note marker on target")
 
             # Re-run sync to assert idempotency (no duped notes/issues)
@@ -404,9 +421,11 @@ def main() -> int:
             notes2 = tgt_project_ref.issues.get(int(mirrored.iid)).notes.list(  # type: ignore[attr-defined]
                 get_all=True, per_page=100, order_by="created_at", sort="asc"
             )
-            if len(notes2) != len(notes):
+            synced_notes2 = _synced_note_count(notes2)
+            if synced_notes2 != synced_notes:
                 _die(
-                    f"expected stable note count on idempotency run; {len(notes)} -> {len(notes2)}"
+                    "expected stable *synced* note count on idempotency run; "
+                    f"{synced_notes} -> {synced_notes2}"
                 )
 
             # Update source issue + add a new comment; ensure target updates and doesn't duplicate old notes
@@ -428,8 +447,9 @@ def main() -> int:
             notes3 = tgt_project_ref.issues.get(int(mirrored.iid)).notes.list(  # type: ignore[attr-defined]
                 get_all=True, per_page=100, order_by="created_at", sort="asc"
             )
-            if len(notes3) != len(notes2) + 1:
-                _die(f"expected exactly one new synced note; {len(notes2)} -> {len(notes3)}")
+            synced_notes3 = _synced_note_count(notes3)
+            if synced_notes3 != synced_notes2 + 1:
+                _die(f"expected exactly one new synced note; {synced_notes2} -> {synced_notes3}")
             if not any("third comment" in (getattr(n, "body", "") or "") for n in notes3):
                 _die("expected new comment to sync to target")
 
@@ -441,8 +461,12 @@ def main() -> int:
             notes4 = tgt_project_ref.issues.get(int(mirrored.iid)).notes.list(  # type: ignore[attr-defined]
                 get_all=True, per_page=100, order_by="created_at", sort="asc"
             )
-            if len(notes4) != len(notes3):
-                _die(f"expected stable note count post-update; {len(notes3)} -> {len(notes4)}")
+            synced_notes4 = _synced_note_count(notes4)
+            if synced_notes4 != synced_notes3:
+                _die(
+                    "expected stable *synced* note count post-update; "
+                    f"{synced_notes3} -> {synced_notes4}"
+                )
 
             # --- Bidirectional phase ---
             print("[e2e] enabling bidirectional sync…")
@@ -457,6 +481,8 @@ def main() -> int:
                 }
             )
             tgt_created_iid = int(getattr(tgt_created, "iid"))
+            # Baseline target issue count after creating the target-origin issue.
+            tgt_issues_bidirectional_base = tgt_project_ref.issues.list(get_all=True, state="all")
 
             # Small delay to avoid edge-case timestamp equality around updated_after overlap.
             time.sleep(1.0)
@@ -487,18 +513,29 @@ def main() -> int:
 
             time.sleep(1.0)
             print("[e2e] syncing target comment to source (no ping-pong)…")
-            out6 = svc.sync_project_pair(pair.id)
-            if out6.get("status") not in {"success"}:
-                _die(f"bidirectional comment sync failed: {out6}")
+            # GitLab note visibility can be slightly eventual; retry a couple times (with extra sync)
+            # before failing.
+            saw_note_on_source = False
+            for attempt in range(1, 4):
+                out6 = svc.sync_project_pair(pair.id)
+                if out6.get("status") not in {"success"}:
+                    _die(f"bidirectional comment sync failed: {out6}")
 
-            src_issue_full = src_project_ref.issues.get(int(getattr(mirrored_on_source, "iid")))  # type: ignore[attr-defined]
-            src_notes = src_issue_full.notes.list(  # type: ignore[attr-defined]
-                get_all=True, per_page=100, order_by="created_at", sort="asc"
-            )
-            if not any(
-                "note from target (bidirectional)" in (getattr(n, "body", "") or "")
-                for n in src_notes
-            ):
+                src_issue_full = src_project_ref.issues.get(  # type: ignore[attr-defined]
+                    int(getattr(mirrored_on_source, "iid"))
+                )
+                src_notes = src_issue_full.notes.list(  # type: ignore[attr-defined]
+                    get_all=True, per_page=100, order_by="created_at", sort="asc"
+                )
+                if any(
+                    "note from target (bidirectional)" in (getattr(n, "body", "") or "")
+                    for n in src_notes
+                ):
+                    saw_note_on_source = True
+                    break
+                time.sleep(2.0 * attempt)
+
+            if not saw_note_on_source:
                 _die("expected target note to sync to source in bidirectional mode")
 
             tgt_notes_after = tgt_created_issue.notes.list(  # type: ignore[attr-defined]
@@ -523,9 +560,10 @@ def main() -> int:
                 _die(
                     f"expected stable issue count on source; {len(src_issues)} -> {len(src_issues2)}"
                 )
-            if len(tgt_issues3) != len(tgt_issues2):
+            if len(tgt_issues3) != len(tgt_issues_bidirectional_base):
                 _die(
-                    f"expected stable issue count on target; {len(tgt_issues2)} -> {len(tgt_issues3)}"
+                    "expected stable issue count on target; "
+                    f"{len(tgt_issues_bidirectional_base)} -> {len(tgt_issues3)}"
                 )
 
             # Keep references in locals so linters don't complain about "unused"

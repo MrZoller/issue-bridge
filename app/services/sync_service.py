@@ -1481,6 +1481,16 @@ class SyncService:
                         # Check if source was updated since last sync
                         source_updated = self._parse_gitlab_datetime(source_issue.updated_at)
                         last_synced_at = self._normalize_utc_naive(synced_issue.last_synced_at)
+                        # GitLab timestamps are often second-granularity while our DB stores microseconds,
+                        # and GitLab/server clocks can be slightly skewed relative to the worker clock.
+                        # In bidirectional runs, one direction can update `last_synced_at` and the reverse
+                        # direction may then miss legitimate updates (especially comment-only updates).
+                        # Apply a tolerance window to reduce false "no update" decisions.
+                        compare_after = (
+                            (last_synced_at - timedelta(minutes=2))
+                            if last_synced_at is not None
+                            else None
+                        )
                         source_hash = self._compute_synced_hash(
                             source_issue,
                             source_instance_url=source_instance.url,
@@ -1488,7 +1498,7 @@ class SyncService:
                         )
 
                         if synced_issue.sync_hash != source_hash and (
-                            last_synced_at is None or source_updated > last_synced_at
+                            compare_after is None or source_updated > compare_after
                         ):
                             # Update target issue
                             self._update_issue_from_source(
@@ -1505,7 +1515,7 @@ class SyncService:
                             synced_issue.sync_hash = source_hash
                             self.db.commit()
                             stats["updated"] += 1
-                        elif last_synced_at is None or source_updated > last_synced_at:
+                        elif compare_after is None or source_updated > compare_after:
                             # Likely comment-only or system updates; keep issue content but still sync comments.
                             self._sync_comments(
                                 source_issue,
