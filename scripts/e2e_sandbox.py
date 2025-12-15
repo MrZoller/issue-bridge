@@ -353,9 +353,9 @@ def main() -> int:
 
             # Verify target has issues + markers
             tgt_project_ref = tgt_gl.projects.get(tgt_project_id)
-            tgt_issues = tgt_project_ref.issues.list(
-                get_all=True, state="all", order_by="iid", sort="asc"
-            )
+            # GitLab API does not support order_by=iid; sort client-side for determinism.
+            tgt_issues = tgt_project_ref.issues.list(get_all=True, state="all")
+            tgt_issues = sorted(tgt_issues, key=lambda i: int(getattr(i, "iid", 0) or 0))
             if len(tgt_issues) < 2:
                 _die(f"expected >=2 issues on target, found {len(tgt_issues)}")
 
