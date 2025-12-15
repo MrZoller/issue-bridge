@@ -1481,12 +1481,13 @@ class SyncService:
                         # Check if source was updated since last sync
                         source_updated = self._parse_gitlab_datetime(source_issue.updated_at)
                         last_synced_at = self._normalize_utc_naive(synced_issue.last_synced_at)
-                        # GitLab timestamps are often second-granularity while our DB stores microseconds.
+                        # GitLab timestamps are often second-granularity while our DB stores microseconds,
+                        # and GitLab/server clocks can be slightly skewed relative to the worker clock.
                         # In bidirectional runs, one direction can update `last_synced_at` and the reverse
-                        # direction may then miss legitimate updates within the same second.
-                        # Apply a small tolerance to reduce false "no update" decisions.
+                        # direction may then miss legitimate updates (especially comment-only updates).
+                        # Apply a tolerance window to reduce false "no update" decisions.
                         compare_after = (
-                            (last_synced_at - timedelta(seconds=2))
+                            (last_synced_at - timedelta(minutes=2))
                             if last_synced_at is not None
                             else None
                         )
