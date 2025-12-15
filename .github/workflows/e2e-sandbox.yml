@@ -1,0 +1,78 @@
+name: e2e-sandbox
+
+on:
+  workflow_dispatch:
+    inputs:
+      keep_resources:
+        description: "Keep sandbox GitLab projects and DB for inspection (E2E_KEEP=1)"
+        required: false
+        default: false
+        type: boolean
+      gitlab_url:
+        description: "GitLab base URL (defaults to https://gitlab.com)"
+        required: false
+        default: "https://gitlab.com"
+        type: string
+      namespace_path:
+        description: "GitLab namespace path override (e.g. group/subgroup). Leave empty to use repo variable E2E_NAMESPACE_PATH."
+        required: false
+        default: ""
+        type: string
+      namespace_id:
+        description: "GitLab namespace id override (numeric). Leave empty to use namespace_path."
+        required: false
+        default: ""
+        type: string
+      prefix:
+        description: "Project name prefix (E2E_PREFIX)"
+        required: false
+        default: "issuebridge-e2e"
+        type: string
+
+jobs:
+  gitlab-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Validate required secrets/vars
+        env:
+          E2E_GITLAB_TOKEN: ${{ secrets.E2E_GITLAB_TOKEN }}
+          # Prefer workflow input; fall back to repo variable.
+          E2E_NAMESPACE_PATH: ${{ inputs.namespace_path || vars.E2E_NAMESPACE_PATH }}
+          E2E_NAMESPACE_ID: ${{ inputs.namespace_id }}
+        run: |
+          set -euo pipefail
+          if [ -z "${E2E_GITLAB_TOKEN:-}" ]; then
+            echo "Missing required secret: E2E_GITLAB_TOKEN" >&2
+            exit 1
+          fi
+          if [ -z "${E2E_NAMESPACE_ID:-}" ] && [ -z "${E2E_NAMESPACE_PATH:-}" ]; then
+            echo "Missing required namespace: set workflow input 'namespace_id'/'namespace_path' or repo variable E2E_NAMESPACE_PATH" >&2
+            exit 1
+          fi
+
+      - name: Run GitLab E2E sandbox
+        env:
+          ISSUEBRIDGE_E2E: "1"
+          E2E_GITLAB_URL: ${{ inputs.gitlab_url }}
+          E2E_GITLAB_TOKEN: ${{ secrets.E2E_GITLAB_TOKEN }}
+          E2E_NAMESPACE_PATH: ${{ inputs.namespace_path || vars.E2E_NAMESPACE_PATH }}
+          E2E_NAMESPACE_ID: ${{ inputs.namespace_id }}
+          E2E_PREFIX: ${{ inputs.prefix }}
+          E2E_KEEP: ${{ inputs.keep_resources && '1' || '0' }}
+        run: |
+          python scripts/e2e_sandbox.py
+
