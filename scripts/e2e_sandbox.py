@@ -481,6 +481,8 @@ def main() -> int:
                 }
             )
             tgt_created_iid = int(getattr(tgt_created, "iid"))
+            # Baseline target issue count after creating the target-origin issue.
+            tgt_issues_bidirectional_base = tgt_project_ref.issues.list(get_all=True, state="all")
 
             # Small delay to avoid edge-case timestamp equality around updated_after overlap.
             time.sleep(1.0)
@@ -558,9 +560,10 @@ def main() -> int:
                 _die(
                     f"expected stable issue count on source; {len(src_issues)} -> {len(src_issues2)}"
                 )
-            if len(tgt_issues3) != len(tgt_issues2):
+            if len(tgt_issues3) != len(tgt_issues_bidirectional_base):
                 _die(
-                    f"expected stable issue count on target; {len(tgt_issues2)} -> {len(tgt_issues3)}"
+                    "expected stable issue count on target; "
+                    f"{len(tgt_issues_bidirectional_base)} -> {len(tgt_issues3)}"
                 )
 
             # Keep references in locals so linters don't complain about "unused"
