@@ -511,18 +511,29 @@ def main() -> int:
 
             time.sleep(1.0)
             print("[e2e] syncing target comment to source (no ping-pong)…")
-            out6 = svc.sync_project_pair(pair.id)
-            if out6.get("status") not in {"success"}:
-                _die(f"bidirectional comment sync failed: {out6}")
+            # GitLab note visibility can be slightly eventual; retry a couple times (with extra sync)
+            # before failing.
+            saw_note_on_source = False
+            for attempt in range(1, 4):
+                out6 = svc.sync_project_pair(pair.id)
+                if out6.get("status") not in {"success"}:
+                    _die(f"bidirectional comment sync failed: {out6}")
 
-            src_issue_full = src_project_ref.issues.get(int(getattr(mirrored_on_source, "iid")))  # type: ignore[attr-defined]
-            src_notes = src_issue_full.notes.list(  # type: ignore[attr-defined]
-                get_all=True, per_page=100, order_by="created_at", sort="asc"
-            )
-            if not any(
-                "note from target (bidirectional)" in (getattr(n, "body", "") or "")
-                for n in src_notes
-            ):
+                src_issue_full = src_project_ref.issues.get(  # type: ignore[attr-defined]
+                    int(getattr(mirrored_on_source, "iid"))
+                )
+                src_notes = src_issue_full.notes.list(  # type: ignore[attr-defined]
+                    get_all=True, per_page=100, order_by="created_at", sort="asc"
+                )
+                if any(
+                    "note from target (bidirectional)" in (getattr(n, "body", "") or "")
+                    for n in src_notes
+                ):
+                    saw_note_on_source = True
+                    break
+                time.sleep(2.0 * attempt)
+
+            if not saw_note_on_source:
                 _die("expected target note to sync to source in bidirectional mode")
 
             tgt_notes_after = tgt_created_issue.notes.list(  # type: ignore[attr-defined]
