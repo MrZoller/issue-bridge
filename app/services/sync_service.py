@@ -1644,7 +1644,9 @@ class SyncService:
                             target_project_id,
                             target_instance.id,
                             source_project_id,
-                            target_catch_all_username=getattr(target_instance, "catch_all_username", None),
+                            target_catch_all_username=getattr(
+                                target_instance, "catch_all_username", None
+                            ),
                             stats=stats,
                         )
 

@@ -52,7 +52,10 @@ class UserMappingLookupTests(unittest.TestCase):
 
         svc = SyncService(_FakeSession(first_queue=[None, None]))
         out = svc._map_usernames(
-            ["alice", "bob"], source_instance_id=1, target_instance_id=2, fallback_username="catchall"
+            ["alice", "bob"],
+            source_instance_id=1,
+            target_instance_id=2,
+            fallback_username="catchall",
         )
         self.assertEqual(out, ["catchall", "catchall"])
 
