@@ -587,10 +587,17 @@ class SyncService:
     def _compute_synced_hash(
         self, source_issue: Any, *, source_instance_url: str, source_project_id: str
     ) -> str:
-        """Compute hash for the content we will actually write to the target."""
-        marker_fields = self._marker_fields_from_issue(source_issue)
+        """Compute hash for the content we will actually write to the target.
+
+        Note: we always preserve/append sync markers (for de-dupe and repair), even if
+        the description field is disabled. The hash itself only considers enabled fields.
+        """
+        marker_fields = self._marker_fields_from_issue(source_issue, enabled_fields=self._enabled_fields)
+        base_desc = getattr(source_issue, "description", None) or ""
+        if not self._field_enabled("description"):
+            base_desc = ""
         synced_description = self._add_sync_reference(
-            getattr(source_issue, "description", None) or "",
+            base_desc,
             source_instance_url,
             int(source_issue.iid),
             source_project_id,
@@ -610,8 +617,14 @@ class SyncService:
         )
         return self._compute_issue_hash(proxy)
 
-    def _marker_fields_from_issue(self, issue: Any) -> Dict[str, Any]:
-        """Extract stable, title-based fields to persist in markers."""
+    def _marker_fields_from_issue(
+        self, issue: Any, *, enabled_fields: Optional[set[str]] = None
+    ) -> Dict[str, Any]:
+        """Extract stable, title-based fields to persist in markers.
+
+        Relationship-like fields are only included when their corresponding sync field is enabled.
+        """
+        enabled = enabled_fields or self._enabled_fields or self.DEFAULT_SYNC_FIELDS
         milestone_title = None
         try:
             milestone_title = self._extract_milestone_title(getattr(issue, "milestone", None))
@@ -623,17 +636,17 @@ class SyncService:
 
         fields: Dict[str, Any] = {}
         issue_type = getattr(issue, "issue_type", None)
-        if issue_type:
+        if issue_type and "issue_type" in enabled:
             fields["issue_type"] = issue_type
-        if milestone_title:
+        if milestone_title and "milestone" in enabled:
             fields["milestone_title"] = milestone_title
-        if iteration and iteration.get("title"):
+        if iteration and iteration.get("title") and "iteration" in enabled:
             fields["iteration_title"] = iteration.get("title")
             if iteration.get("start_date"):
                 fields["iteration_start_date"] = iteration.get("start_date")
             if iteration.get("due_date"):
                 fields["iteration_due_date"] = iteration.get("due_date")
-        if epic and epic.get("title"):
+        if epic and epic.get("title") and "epic" in enabled:
             fields["epic_title"] = epic.get("title")
         return fields
 
@@ -665,115 +678,157 @@ class SyncService:
             except Exception:
                 return None
 
-        # Map assignees
+        # Map assignees (optional)
         assignee_ids = []
-        if hasattr(source_issue, "assignees") and source_issue.assignees:
-            assignee_usernames = [
-                u for u in (self._extract_username(a) for a in source_issue.assignees) if u
-            ]
-            mapped_usernames = self._map_usernames(
-                assignee_usernames,
-                source_instance.id,
-                target_instance_id,
-                fallback_username=(target_catch_all_username or None),
-            )
-            for username in mapped_usernames:
-                user = target_client.get_user_by_username(username)
-                if user:
-                    assignee_ids.append(user.id)
+        if self._field_enabled("assignees"):
+            if hasattr(source_issue, "assignees") and source_issue.assignees:
+                assignee_usernames = [
+                    u for u in (self._extract_username(a) for a in source_issue.assignees) if u
+                ]
+                mapped_usernames = self._map_usernames(
+                    assignee_usernames,
+                    source_instance.id,
+                    target_instance_id,
+                    fallback_username=(target_catch_all_username or None),
+                )
+                for username in mapped_usernames:
+                    user = target_client.get_user_by_username(username)
+                    if user:
+                        assignee_ids.append(user.id)
 
-        # Ensure labels exist
-        if source_issue.labels:
-            self._ensure_labels(target_client, target_project_id, source_issue.labels)
+        # Ensure labels exist (optional)
+        if self._field_enabled("labels"):
+            if getattr(source_issue, "labels", None):
+                self._ensure_labels(target_client, target_project_id, source_issue.labels)
 
-        # Ensure milestone exists
+        # Ensure milestone exists (optional)
         milestone_id = None
-        if hasattr(source_issue, "milestone") and source_issue.milestone:
-            milestone_title = self._extract_milestone_title(source_issue.milestone)
-            milestone_id = self._ensure_milestone(target_client, target_project_id, milestone_title)
+        if self._field_enabled("milestone"):
+            if hasattr(source_issue, "milestone") and source_issue.milestone:
+                milestone_title = self._extract_milestone_title(source_issue.milestone)
+                milestone_id = self._ensure_milestone(
+                    target_client, target_project_id, milestone_title
+                )
 
         # Prepare issue data
+        marker_fields = self._marker_fields_from_issue(source_issue, enabled_fields=self._enabled_fields)
+        base_desc = getattr(source_issue, "description", None) or ""
+        if not self._field_enabled("description"):
+            base_desc = ""
         synced_description = self._add_sync_reference(
-            source_issue.description,
+            base_desc,
             source_instance.url,
             source_issue.iid,
             source_project_id,
-            marker_fields=self._marker_fields_from_issue(source_issue),
+            marker_fields=marker_fields,
         )
         issue_data = {
+            # Title is required by GitLab on create; we always set it.
             "title": source_issue.title,
             "description": synced_description,
-            "labels": source_issue.labels if source_issue.labels else [],
         }
 
+        if self._field_enabled("labels"):
+            issue_data["labels"] = source_issue.labels if getattr(source_issue, "labels", None) else []
+
         issue_type = getattr(source_issue, "issue_type", None)
-        if issue_type:
+        if issue_type and self._field_enabled("issue_type"):
             issue_data["issue_type"] = issue_type
 
-        if assignee_ids:
+        if assignee_ids and self._field_enabled("assignees"):
             issue_data["assignee_ids"] = assignee_ids
 
-        if milestone_id:
+        if milestone_id and self._field_enabled("milestone"):
             issue_data["milestone_id"] = milestone_id
 
-        if hasattr(source_issue, "due_date") and source_issue.due_date:
-            issue_data["due_date"] = source_issue.due_date
+        if self._field_enabled("due_date"):
+            if hasattr(source_issue, "due_date") and source_issue.due_date:
+                issue_data["due_date"] = source_issue.due_date
 
         # Optional fields
-        weight = getattr(source_issue, "weight", None)
-        if weight is not None:
-            issue_data["weight"] = weight
+        if self._field_enabled("weight"):
+            weight = getattr(source_issue, "weight", None)
+            if weight is not None:
+                issue_data["weight"] = weight
+
+        # Optional extra fields (best-effort; can be disabled via SYNC_FIELDS).
+        optional_keys: list[str] = []
+        if self._field_enabled("confidential") and getattr(source_issue, "confidential", None) is not None:
+            issue_data["confidential"] = getattr(source_issue, "confidential")
+            optional_keys.append("confidential")
+        if (
+            self._field_enabled("discussion_locked")
+            and getattr(source_issue, "discussion_locked", None) is not None
+        ):
+            issue_data["discussion_locked"] = getattr(source_issue, "discussion_locked")
+            optional_keys.append("discussion_locked")
 
         # Iteration (map by title, best-effort create when possible)
-        iteration = self._extract_iteration(source_issue)
-        if iteration:
-            it_id = self._map_iteration_id(target_client, target_project_id, iteration)
-            if it_id:
-                issue_data["iteration_id"] = it_id
+        if self._field_enabled("iteration"):
+            iteration = self._extract_iteration(source_issue)
+            if iteration:
+                it_id = self._map_iteration_id(target_client, target_project_id, iteration)
+                if it_id:
+                    issue_data["iteration_id"] = it_id
 
         # Create issue
-        target_issue = target_client.create_issue(target_project_id, issue_data)
+        try:
+            target_issue = target_client.create_issue(target_project_id, issue_data)
+        except Exception as e:
+            # If optional fields aren't accepted by this GitLab, retry without them once.
+            if optional_keys:
+                for k in optional_keys:
+                    issue_data.pop(k, None)
+                target_issue = target_client.create_issue(target_project_id, issue_data)
+            else:
+                raise e
 
         # Time estimate (best-effort via dedicated endpoint)
-        estimate_seconds = _time_estimate_seconds(source_issue)
-        if estimate_seconds:
-            try:
-                target_client.set_issue_time_estimate(
-                    target_project_id, target_issue.iid, estimate_seconds
-                )
-            except Exception as e:
-                logger.warning(f"Failed to set time estimate on issue #{target_issue.iid}: {e}")
-
-        # Sync comments
-        self._sync_comments(
-            source_issue,
-            target_issue,
-            source_instance,
-            target_client,
-            target_project_id,
-            target_instance_id,
-            source_project_id,
-            stats=stats,
-        )
-
-        # Epic link (best-effort, title-mapped)
-        epic = self._extract_epic(source_issue)
-        if epic and epic.get("title"):
-            epic_iid = self._map_epic_iid(target_client, target_project_id, epic)
-            group_id = self._get_cached_group_id(target_client, target_project_id)
-            if epic_iid and group_id and getattr(target_issue, "id", None):
+        if self._field_enabled("time_estimate"):
+            estimate_seconds = _time_estimate_seconds(source_issue)
+            if estimate_seconds:
                 try:
-                    target_client.add_issue_to_epic(
-                        group_id, epic_iid, issue_id=int(target_issue.id)
+                    target_client.set_issue_time_estimate(
+                        target_project_id, target_issue.iid, estimate_seconds
                     )
                 except Exception as e:
-                    logger.warning(f"Failed to link epic on created issue #{target_issue.iid}: {e}")
+                    logger.warning(f"Failed to set time estimate on issue #{target_issue.iid}: {e}")
+
+        # Sync comments
+        if self._field_enabled("comments"):
+            self._sync_comments(
+                source_issue,
+                target_issue,
+                source_instance,
+                target_client,
+                target_project_id,
+                target_instance_id,
+                source_project_id,
+                stats=stats,
+            )
+
+        # Epic link (best-effort, title-mapped)
+        if self._field_enabled("epic"):
+            epic = self._extract_epic(source_issue)
+            if epic and epic.get("title"):
+                epic_iid = self._map_epic_iid(target_client, target_project_id, epic)
+                group_id = self._get_cached_group_id(target_client, target_project_id)
+                if epic_iid and group_id and getattr(target_issue, "id", None):
+                    try:
+                        target_client.add_issue_to_epic(
+                            group_id, epic_iid, issue_id=int(target_issue.id)
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            f"Failed to link epic on created issue #{target_issue.iid}: {e}"
+                        )
 
         # Close issue if source is closed
-        if source_issue.state == "closed":
-            target_client.update_issue(
-                target_project_id, target_issue.iid, {"state_event": "close"}
-            )
+        if self._field_enabled("state"):
+            if getattr(source_issue, "state", None) == "closed":
+                target_client.update_issue(
+                    target_project_id, target_issue.iid, {"state_event": "close"}
+                )
 
         return target_issue
 
@@ -1160,110 +1215,173 @@ class SyncService:
             except Exception:
                 return None
 
-        # Map assignees
-        # Always set assignee_ids so removals on source clear target.
+        # Map assignees (optional)
+        # If enabled, always set assignee_ids so removals on source clear target.
         assignee_ids: List[int] = []
-        if hasattr(source_issue, "assignees") and source_issue.assignees:
-            assignee_usernames = [
-                u for u in (self._extract_username(a) for a in source_issue.assignees) if u
-            ]
-            mapped_usernames = self._map_usernames(
-                assignee_usernames,
-                source_instance.id,
-                target_instance_id,
-                fallback_username=(target_catch_all_username or None),
-            )
-            for username in mapped_usernames:
-                user = target_client.get_user_by_username(username)
-                if user:
-                    assignee_ids.append(user.id)
+        if self._field_enabled("assignees"):
+            if hasattr(source_issue, "assignees") and source_issue.assignees:
+                assignee_usernames = [
+                    u for u in (self._extract_username(a) for a in source_issue.assignees) if u
+                ]
+                mapped_usernames = self._map_usernames(
+                    assignee_usernames,
+                    source_instance.id,
+                    target_instance_id,
+                    fallback_username=(target_catch_all_username or None),
+                )
+                for username in mapped_usernames:
+                    user = target_client.get_user_by_username(username)
+                    if user:
+                        assignee_ids.append(user.id)
 
-        # Ensure labels exist
-        if source_issue.labels:
-            self._ensure_labels(target_client, target_project_id, source_issue.labels)
+        # Ensure labels exist (optional)
+        if self._field_enabled("labels"):
+            if getattr(source_issue, "labels", None):
+                self._ensure_labels(target_client, target_project_id, source_issue.labels)
 
-        # Ensure milestone exists
+        # Ensure milestone exists (optional)
         milestone_id = None
-        if hasattr(source_issue, "milestone") and source_issue.milestone:
-            milestone_title = self._extract_milestone_title(source_issue.milestone)
-            milestone_id = self._ensure_milestone(target_client, target_project_id, milestone_title)
+        if self._field_enabled("milestone"):
+            if hasattr(source_issue, "milestone") and source_issue.milestone:
+                milestone_title = self._extract_milestone_title(source_issue.milestone)
+                milestone_id = self._ensure_milestone(
+                    target_client, target_project_id, milestone_title
+                )
 
-        # Prepare update data
-        synced_description = self._add_sync_reference(
-            source_issue.description,
-            source_instance.url,
-            source_issue.iid,
-            source_project_id,
-            marker_fields=self._marker_fields_from_issue(source_issue),
-        )
-        update_data = {
-            "title": source_issue.title,
-            "description": synced_description,
-            "labels": source_issue.labels if source_issue.labels else [],
-            "assignee_ids": assignee_ids,
-        }
+        # Fetch current target for state comparison and for marker-only description updates.
+        target_issue = target_client.get_issue(target_project_id, target_issue_iid)
+
+        marker_fields = self._marker_fields_from_issue(source_issue, enabled_fields=self._enabled_fields)
+
+        update_data: Dict[str, Any] = {}
+
+        # Title (optional on update)
+        if self._field_enabled("title"):
+            update_data["title"] = source_issue.title
+
+        # Description:
+        # - If enabled: sync source description (with marker/footer).
+        # - If disabled: do not overwrite target's text, but still ensure marker exists (append to target description).
+        if self._field_enabled("description"):
+            base_desc = getattr(source_issue, "description", None) or ""
+            update_data["description"] = self._add_sync_reference(
+                base_desc,
+                source_instance.url,
+                source_issue.iid,
+                source_project_id,
+                marker_fields=marker_fields,
+            )
+        else:
+            target_desc = getattr(target_issue, "description", None) or ""
+            # Only write description if we need to append our marker/footer for de-dup/repair.
+            if not self._ISSUE_MARKER_RE.search(target_desc):
+                update_data["description"] = self._add_sync_reference(
+                    target_desc,
+                    source_instance.url,
+                    source_issue.iid,
+                    source_project_id,
+                    marker_fields=marker_fields,
+                )
+
+        if self._field_enabled("labels"):
+            update_data["labels"] = source_issue.labels if getattr(source_issue, "labels", None) else []
+
+        if self._field_enabled("assignees"):
+            update_data["assignee_ids"] = assignee_ids
 
         issue_type = getattr(source_issue, "issue_type", None)
-        if issue_type:
+        if issue_type and self._field_enabled("issue_type"):
             update_data["issue_type"] = issue_type
 
-        # Always set milestone_id/due_date so removals clear target.
+        # Always set milestone_id/due_date so removals clear target, if enabled.
         # GitLab often uses milestone_id=0 to clear; treat None as "clear".
-        update_data["milestone_id"] = milestone_id if milestone_id is not None else 0
-        update_data["due_date"] = getattr(source_issue, "due_date", None)
-        # Weight can be null on GitLab; set it explicitly so removals clear.
-        update_data["weight"] = getattr(source_issue, "weight", None)
+        if self._field_enabled("milestone"):
+            update_data["milestone_id"] = milestone_id if milestone_id is not None else 0
+        if self._field_enabled("due_date"):
+            update_data["due_date"] = getattr(source_issue, "due_date", None)
+        # Weight can be null on GitLab; set it explicitly so removals clear, if enabled.
+        if self._field_enabled("weight"):
+            update_data["weight"] = getattr(source_issue, "weight", None)
 
-        iteration = self._extract_iteration(source_issue)
-        if iteration:
-            it_id = self._map_iteration_id(target_client, target_project_id, iteration)
-            if it_id:
-                update_data["iteration_id"] = it_id
+        if self._field_enabled("iteration"):
+            iteration = self._extract_iteration(source_issue)
+            if iteration:
+                it_id = self._map_iteration_id(target_client, target_project_id, iteration)
+                if it_id:
+                    update_data["iteration_id"] = it_id
+
+        # Optional extra fields (best-effort)
+        optional_keys: list[str] = []
+        if self._field_enabled("confidential") and getattr(source_issue, "confidential", None) is not None:
+            update_data["confidential"] = getattr(source_issue, "confidential")
+            optional_keys.append("confidential")
+        if (
+            self._field_enabled("discussion_locked")
+            and getattr(source_issue, "discussion_locked", None) is not None
+        ):
+            update_data["discussion_locked"] = getattr(source_issue, "discussion_locked")
+            optional_keys.append("discussion_locked")
 
         # Handle state changes
-        target_issue = target_client.get_issue(target_project_id, target_issue_iid)
-        if source_issue.state != target_issue.state:
-            update_data["state_event"] = "close" if source_issue.state == "closed" else "reopen"
+        if self._field_enabled("state"):
+            if getattr(source_issue, "state", None) != getattr(target_issue, "state", None):
+                update_data["state_event"] = (
+                    "close" if source_issue.state == "closed" else "reopen"
+                )
 
         # Update issue
-        target_client.update_issue(target_project_id, target_issue_iid, update_data)
+        if update_data:
+            try:
+                target_client.update_issue(target_project_id, target_issue_iid, update_data)
+            except Exception as e:
+                if optional_keys:
+                    for k in optional_keys:
+                        update_data.pop(k, None)
+                    target_client.update_issue(target_project_id, target_issue_iid, update_data)
+                else:
+                    raise e
 
         # Time estimate (best-effort via dedicated endpoint)
-        estimate_seconds = _time_estimate_seconds(source_issue)
-        try:
-            if estimate_seconds:
-                target_client.set_issue_time_estimate(
-                    target_project_id, target_issue_iid, estimate_seconds
-                )
-            else:
-                target_client.reset_issue_time_estimate(target_project_id, target_issue_iid)
-        except Exception as e:
-            logger.warning(f"Failed to sync time estimate for issue #{target_issue_iid}: {e}")
+        if self._field_enabled("time_estimate"):
+            estimate_seconds = _time_estimate_seconds(source_issue)
+            try:
+                if estimate_seconds:
+                    target_client.set_issue_time_estimate(
+                        target_project_id, target_issue_iid, estimate_seconds
+                    )
+                else:
+                    target_client.reset_issue_time_estimate(target_project_id, target_issue_iid)
+            except Exception as e:
+                logger.warning(f"Failed to sync time estimate for issue #{target_issue_iid}: {e}")
 
         # Sync new comments
-        self._sync_comments(
-            source_issue,
-            target_issue,
-            source_instance,
-            target_client,
-            target_project_id,
-            target_instance_id,
-            source_project_id,
-            stats=stats,
-        )
+        if self._field_enabled("comments"):
+            self._sync_comments(
+                source_issue,
+                target_issue,
+                source_instance,
+                target_client,
+                target_project_id,
+                target_instance_id,
+                source_project_id,
+                stats=stats,
+            )
 
         # Epic link (best-effort, title-mapped)
-        epic = self._extract_epic(source_issue)
-        if epic and epic.get("title"):
-            epic_iid = self._map_epic_iid(target_client, target_project_id, epic)
-            group_id = self._get_cached_group_id(target_client, target_project_id)
-            if epic_iid and group_id and getattr(target_issue, "id", None):
-                try:
-                    target_client.add_issue_to_epic(
-                        group_id, epic_iid, issue_id=int(target_issue.id)
-                    )
-                except Exception as e:
-                    logger.warning(f"Failed to link epic on updated issue #{target_issue_iid}: {e}")
+        if self._field_enabled("epic"):
+            epic = self._extract_epic(source_issue)
+            if epic and epic.get("title"):
+                epic_iid = self._map_epic_iid(target_client, target_project_id, epic)
+                group_id = self._get_cached_group_id(target_client, target_project_id)
+                if epic_iid and group_id and getattr(target_issue, "id", None):
+                    try:
+                        target_client.add_issue_to_epic(
+                            group_id, epic_iid, issue_id=int(target_issue.id)
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            f"Failed to link epic on updated issue #{target_issue_iid}: {e}"
+                        )
 
     def _detect_conflict(
         self, synced_issue: SyncedIssue, source_issue: Any, target_issue: Any
@@ -1622,16 +1740,17 @@ class SyncService:
                             stats["updated"] += 1
                         elif compare_after is None or source_updated > compare_after:
                             # Likely comment-only or system updates; keep issue content but still sync comments.
-                            self._sync_comments(
-                                source_issue,
-                                target_issue,
-                                source_instance,
-                                target_client,
-                                target_project_id,
-                                target_instance.id,
-                                source_project_id,
-                                stats=stats,
-                            )
+                            if self._field_enabled("comments"):
+                                self._sync_comments(
+                                    source_issue,
+                                    target_issue,
+                                    source_instance,
+                                    target_client,
+                                    target_project_id,
+                                    target_instance.id,
+                                    source_project_id,
+                                    stats=stats,
+                                )
                             synced_issue.last_synced_at = self._utcnow()
                             self.db.commit()
                             stats["updated"] += 1
