@@ -450,7 +450,7 @@ Once the service is running, visit:
 - `GET /api/instances/` - List GitLab instances
 - `POST /api/instances/` - Create GitLab instance
 - `GET /api/project-pairs/` - List project pairs
-- `POST /api/project-pairs/` - Create project pair
+- `POST /api/project-pairs/` - Create project pair (name is optional; auto-generated if omitted)
 - `POST /api/sync/{pair_id}/trigger` - Manually trigger sync
 - `POST /api/sync/{pair_id}/repair-mappings` - Rebuild mappings from markers (safe)
 - `GET /api/sync/logs` - Get sync logs
