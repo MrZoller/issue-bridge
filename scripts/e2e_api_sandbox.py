@@ -210,16 +210,20 @@ def main() -> int:
 
         print("[e2e-api] seeding source project…")
         label_bug = getattr(src_project, "labels").create({"name": "bug", "color": "#d73a4a"})  # type: ignore[attr-defined]
+        label_feature = getattr(src_project, "labels").create(  # type: ignore[attr-defined]
+            {"name": "feature", "color": "#0e8a16"}
+        )
         milestone = getattr(src_project, "milestones").create({"title": f"E2E API {cfg.run_id}"})  # type: ignore[attr-defined]
         due = (date.today() + timedelta(days=7)).isoformat()
         issue1 = getattr(src_project, "issues").create(  # type: ignore[attr-defined]
             {
                 "title": f"E2E API issue 1 ({cfg.run_id})",
                 "description": "Seeded by IssueBridge E2E API sandbox runner.",
-                "labels": label_bug.name,
+                "labels": f"{label_bug.name},{label_feature.name}",
                 "milestone_id": milestone.id,
                 "due_date": due,
                 "weight": 2,
+                "confidential": True,
             }
         )
         issue1.notes.create({"body": "api-first comment"})  # type: ignore[attr-defined]
@@ -237,6 +241,26 @@ def main() -> int:
 
         # IMPORTANT: set env BEFORE importing app.* so Settings/DB engine bind to this DB.
         os.environ["DATABASE_URL"] = cfg.db_url
+        # Enable optional fields for this E2E run to validate full supported field coverage.
+        os.environ["SYNC_FIELDS"] = ",".join(
+            [
+                "title",
+                "description",
+                "state",
+                "labels",
+                "assignees",
+                "milestone",
+                "due_date",
+                "weight",
+                "time_estimate",
+                "issue_type",
+                "iteration",
+                "epic",
+                "comments",
+                "confidential",
+                "discussion_locked",
+            ]
+        )
         if cfg.db_url.startswith("sqlite:////"):
             db_path_to_cleanup = cfg.db_url.replace("sqlite:////", "/")
 
@@ -322,6 +346,114 @@ def main() -> int:
                 _die(f"trigger sync failed: {r_sync.status_code} {r_sync.text}")
             if r_sync.json().get("status") != "success":
                 _die(f"unexpected trigger sync response: {r_sync.json()}")
+
+            # ---- Field-level sync assertions (production-critical) ----
+            tgt_ref = gl.projects.get(tgt_project_id)
+            tgt_issues = tgt_ref.issues.list(get_all=True, state="all")
+            mirrored = next(
+                (i for i in tgt_issues if f"E2E API issue 1 ({cfg.run_id})" in i.title), None
+            )
+            if mirrored is None:
+                _die("could not find mirrored issue 1 on target by title")
+
+            # labels should be created + assigned
+            labels = set(getattr(mirrored, "labels", []) or [])
+            if not {"bug", "feature"}.issubset(labels):
+                _die(f"expected labels bug+feature on target issue; got {sorted(labels)}")
+
+            # milestone should be created on target if missing + assigned
+            mirrored_milestone = getattr(mirrored, "milestone", None)
+            milestone_title = None
+            if isinstance(mirrored_milestone, dict):
+                milestone_title = mirrored_milestone.get("title")
+            else:
+                milestone_title = getattr(mirrored_milestone, "title", None)
+            expected_ms = f"E2E API {cfg.run_id}"
+            if milestone_title != expected_ms:
+                _die(f"expected milestone '{expected_ms}' on target issue, got '{milestone_title}'")
+
+            # due date + weight + confidential should sync
+            if getattr(mirrored, "due_date", None) not in {due, None}:
+                _die(
+                    f"expected due_date '{due}' on target issue, got {getattr(mirrored, 'due_date', None)}"
+                )
+            if getattr(mirrored, "weight", None) not in {2, "2"}:
+                _die(f"expected weight 2 on target issue, got {getattr(mirrored, 'weight', None)}")
+            if getattr(mirrored, "confidential", None) is not True:
+                _die("expected confidential=True on target issue")
+
+            # comments should sync (at least two)
+            notes = tgt_ref.issues.get(int(getattr(mirrored, "iid"))).notes.list(  # type: ignore[attr-defined]
+                get_all=True, per_page=100, order_by="created_at", sort="asc"
+            )
+            if not any("api-first comment" in (getattr(n, "body", "") or "") for n in notes):
+                _die("expected first comment to sync to target")
+            if not any("api-second comment" in (getattr(n, "body", "") or "") for n in notes):
+                _die("expected second comment to sync to target")
+
+            # ensure target project now has the milestone/labels created
+            tgt_milestones = tgt_ref.milestones.list(get_all=True, per_page=100)  # type: ignore[attr-defined]
+            if not any(getattr(m, "title", None) == expected_ms for m in tgt_milestones):
+                _die("expected milestone to be created in target project")
+            tgt_labels = tgt_ref.labels.list(get_all=True, per_page=100)  # type: ignore[attr-defined]
+            tgt_label_names = {getattr(label_obj, "name", None) for label_obj in tgt_labels}
+            if not {"bug", "feature"}.issubset(tgt_label_names):
+                _die("expected labels to be created in target project")
+
+            # closed issue should remain closed on target
+            mirrored_closed = next(
+                (i for i in tgt_issues if f"E2E API closed issue ({cfg.run_id})" in i.title), None
+            )
+            if mirrored_closed is None:
+                _die("could not find mirrored closed issue on target by title")
+            if getattr(mirrored_closed, "state", None) != "closed":
+                _die(
+                    f"expected closed state on target, got {getattr(mirrored_closed, 'state', None)}"
+                )
+
+            # ---- Update test: milestone creation/update + due_date clear + label add + weight change ----
+            milestone2 = getattr(src_project, "milestones").create(  # type: ignore[attr-defined]
+                {"title": f"E2E API v2 {cfg.run_id}"}
+            )
+            label_urgent = getattr(src_project, "labels").create(  # type: ignore[attr-defined]
+                {"name": "urgent", "color": "#b60205"}
+            )
+            issue1.milestone_id = milestone2.id
+            issue1.due_date = ""  # clear
+            issue1.weight = 5
+            issue1.labels = f"{label_bug.name},{label_feature.name},{label_urgent.name}"
+            issue1.save()
+
+            time.sleep(1.0)
+            r_sync_u = client.post(f"/api/sync/{pair_id}/trigger")
+            if r_sync_u.status_code != 200 or r_sync_u.json().get("status") != "success":
+                _die(f"update trigger sync failed: {r_sync_u.status_code} {r_sync_u.text}")
+
+            tgt_issues_u = tgt_ref.issues.list(get_all=True, state="all")
+            mirrored_u = next(
+                (i for i in tgt_issues_u if f"E2E API issue 1 ({cfg.run_id})" in i.title), None
+            )
+            if mirrored_u is None:
+                _die("could not re-find mirrored issue 1 on target after update")
+
+            ms_u = getattr(mirrored_u, "milestone", None)
+            ms_u_title = (
+                ms_u.get("title") if isinstance(ms_u, dict) else getattr(ms_u, "title", None)
+            )
+            expected_ms2 = f"E2E API v2 {cfg.run_id}"
+            if ms_u_title != expected_ms2:
+                _die(f"expected updated milestone '{expected_ms2}', got '{ms_u_title}'")
+            if getattr(mirrored_u, "due_date", None) not in {None, ""}:
+                _die(
+                    f"expected due_date cleared on target, got {getattr(mirrored_u, 'due_date', None)}"
+                )
+            if getattr(mirrored_u, "weight", None) not in {5, "5"}:
+                _die(
+                    f"expected updated weight 5 on target, got {getattr(mirrored_u, 'weight', None)}"
+                )
+            labels_u = set(getattr(mirrored_u, "labels", []) or [])
+            if "urgent" not in labels_u:
+                _die(f"expected new label 'urgent' on target issue; got {sorted(labels_u)}")
 
             # Synced issues + logs endpoints
             r_synced = client.get(f"/api/sync/synced-issues?project_pair_id={pair_id}")
