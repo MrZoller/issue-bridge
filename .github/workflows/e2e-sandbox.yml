@@ -76,3 +76,15 @@ jobs:
         run: |
           python scripts/e2e_sandbox.py
 
+      - name: Run GitLab E2E API sandbox (FastAPI endpoints)
+        env:
+          ISSUEBRIDGE_E2E: "1"
+          E2E_GITLAB_URL: ${{ inputs.gitlab_url }}
+          E2E_GITLAB_TOKEN: ${{ secrets.E2E_GITLAB_TOKEN }}
+          E2E_NAMESPACE_PATH: ${{ inputs.namespace_path || vars.E2E_NAMESPACE_PATH }}
+          E2E_NAMESPACE_ID: ${{ inputs.namespace_id }}
+          E2E_PREFIX: ${{ inputs.prefix }}
+          E2E_KEEP: ${{ inputs.keep_resources && '1' || '0' }}
+        run: |
+          python scripts/e2e_api_sandbox.py
+
