@@ -615,6 +615,12 @@ class SyncService:
             due_date=getattr(source_issue, "due_date", None),
             weight=getattr(source_issue, "weight", None),
             time_stats=getattr(source_issue, "time_stats", None),
+            issue_type=getattr(source_issue, "issue_type", None),
+            iteration=getattr(source_issue, "iteration", None),
+            epic=getattr(source_issue, "epic", None),
+            epic_iid=getattr(source_issue, "epic_iid", None),
+            confidential=getattr(source_issue, "confidential", None),
+            discussion_locked=getattr(source_issue, "discussion_locked", None),
             updated_at=getattr(source_issue, "updated_at", None),
         )
         return self._compute_issue_hash(proxy)

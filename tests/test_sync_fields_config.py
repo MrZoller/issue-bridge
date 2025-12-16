@@ -109,6 +109,40 @@ class SyncFieldsConfigTests(unittest.TestCase):
         finally:
             sync_service_module.settings.sync_fields = old
 
+    def test_sync_fields_confidential_affects_synced_hash(self):
+        from app.services import sync_service as sync_service_module
+
+        old = sync_service_module.settings.sync_fields
+        sync_service_module.settings.sync_fields = "title,description,confidential"
+        try:
+            svc = sync_service_module.SyncService(db=SimpleNamespace())
+
+            base = dict(
+                iid=1,
+                title="T",
+                description="D",
+                labels=[],
+                assignees=[],
+                milestone=None,
+                due_date=None,
+                state="opened",
+                weight=None,
+                time_stats=None,
+            )
+            a = SimpleNamespace(**base, confidential=False)
+            b = SimpleNamespace(**base, confidential=True)
+
+            ha = svc._compute_synced_hash(
+                a, source_instance_url="https://src", source_project_id="p"
+            )
+            hb = svc._compute_synced_hash(
+                b, source_instance_url="https://src", source_project_id="p"
+            )
+
+            self.assertNotEqual(ha, hb)
+        finally:
+            sync_service_module.settings.sync_fields = old
+
 
 if __name__ == "__main__":
     unittest.main()
