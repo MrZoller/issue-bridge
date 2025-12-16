@@ -29,9 +29,52 @@ logger = logging.getLogger(__name__)
 class SyncService:
     """Service for synchronizing GitLab issues"""
 
+    # Field allowlist for configurable syncing.
+    # Note: some fields are required by GitLab on create (e.g., title), so disabling them
+    # affects update behavior but not initial issue creation.
+    DEFAULT_SYNC_FIELDS: set[str] = {
+        "title",
+        "description",
+        "state",
+        "labels",
+        "assignees",
+        "milestone",
+        "due_date",
+        "weight",
+        "time_estimate",
+        "issue_type",
+        "iteration",
+        "epic",
+        "comments",
+    }
+    # Extra fields supported opportunistically (best-effort).
+    OPTIONAL_SYNC_FIELDS: set[str] = {
+        "confidential",
+        "discussion_locked",
+    }
+    ALLOWED_SYNC_FIELDS: set[str] = DEFAULT_SYNC_FIELDS | OPTIONAL_SYNC_FIELDS
+
     def __init__(self, db: Session):
         self.db = db
         self.clients: Dict[int, GitLabClient] = {}
+        # Defaults can be overridden per project pair at runtime.
+        self._enabled_fields: set[str] = set(self.DEFAULT_SYNC_FIELDS)
+
+    def _set_enabled_fields_from_project_pair(self, project_pair: ProjectPair):
+        """Set enabled field allowlist for this sync run (per project pair)."""
+        raw = (getattr(project_pair, "sync_fields", None) or "").strip()
+        if not raw:
+            self._enabled_fields = set(self.DEFAULT_SYNC_FIELDS)
+            return
+
+        fields = {f.strip() for f in raw.split(",") if f and f.strip()}
+        # Filter unknown fields silently (so old DB rows/config don't break sync).
+        fields = {f for f in fields if f in self.ALLOWED_SYNC_FIELDS}
+        # Always keep comments marker/metadata behavior stable (but allow disabling comment syncing itself).
+        self._enabled_fields = fields or set(self.DEFAULT_SYNC_FIELDS)
+
+    def _field_enabled(self, name: str) -> bool:
+        return name in self._enabled_fields
 
     @staticmethod
     def _utcnow() -> datetime:
@@ -320,8 +363,11 @@ class SyncService:
         milestone = client.create_milestone(project_id, {"title": milestone_title})
         return milestone.id if milestone else None
 
-    def _compute_issue_hash(self, issue: Any) -> str:
-        """Compute hash of issue content for change detection"""
+    def _compute_issue_hash(self, issue: Any, *, enabled_fields: Optional[set[str]] = None) -> str:
+        """Compute hash of issue content for change detection.
+
+        When `enabled_fields` is provided, only those fields contribute to the hash.
+        """
 
         def _time_estimate_seconds(obj: Any) -> Optional[int]:
             ts = getattr(obj, "time_stats", None)
@@ -353,21 +399,38 @@ class SyncService:
         except Exception:
             milestone_title = None
 
-        data = {
-            "title": issue.title,
-            "description": issue.description or "",
-            "state": issue.state,
-            "labels": sorted(issue.labels or []),
-            "assignees": sorted(assignees),
-            "due_date": getattr(issue, "due_date", None),
-            "milestone": milestone_title,
-            "weight": getattr(issue, "weight", None),
-            "time_estimate_seconds": _time_estimate_seconds(issue),
-            "issue_type": getattr(issue, "issue_type", None),
-            "iteration": self._safe_attr(getattr(issue, "iteration", None), "title"),
-            "epic": self._safe_attr(getattr(issue, "epic", None), "title")
-            or getattr(issue, "epic_iid", None),
-        }
+        enabled = enabled_fields or self._enabled_fields or self.DEFAULT_SYNC_FIELDS
+        data: Dict[str, Any] = {}
+        if "title" in enabled:
+            data["title"] = getattr(issue, "title", "")
+        if "description" in enabled:
+            data["description"] = getattr(issue, "description", None) or ""
+        if "state" in enabled:
+            data["state"] = getattr(issue, "state", None)
+        if "labels" in enabled:
+            data["labels"] = sorted(getattr(issue, "labels", None) or [])
+        if "assignees" in enabled:
+            data["assignees"] = sorted(assignees)
+        if "due_date" in enabled:
+            data["due_date"] = getattr(issue, "due_date", None)
+        if "milestone" in enabled:
+            data["milestone"] = milestone_title
+        if "weight" in enabled:
+            data["weight"] = getattr(issue, "weight", None)
+        if "time_estimate" in enabled:
+            data["time_estimate_seconds"] = _time_estimate_seconds(issue)
+        if "issue_type" in enabled:
+            data["issue_type"] = getattr(issue, "issue_type", None)
+        if "iteration" in enabled:
+            data["iteration"] = self._safe_attr(getattr(issue, "iteration", None), "title")
+        if "epic" in enabled:
+            data["epic"] = self._safe_attr(getattr(issue, "epic", None), "title") or getattr(
+                issue, "epic_iid", None
+            )
+        if "confidential" in enabled:
+            data["confidential"] = getattr(issue, "confidential", None)
+        if "discussion_locked" in enabled:
+            data["discussion_locked"] = getattr(issue, "discussion_locked", None)
         return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
 
     def _get_cached_group_id(self, client: GitLabClient, project_id: str) -> Optional[int]:
@@ -1329,6 +1392,9 @@ class SyncService:
         if not project_pair.sync_enabled:
             logger.info(f"Sync disabled for project pair {project_pair.name}")
             return {"status": "skipped", "message": "Sync disabled"}
+
+        # Apply per-pair field allowlist (defaults if unset).
+        self._set_enabled_fields_from_project_pair(project_pair)
 
         logger.info(f"Starting sync for project pair: {project_pair.name}")
 
