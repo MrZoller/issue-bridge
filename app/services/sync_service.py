@@ -592,7 +592,9 @@ class SyncService:
         Note: we always preserve/append sync markers (for de-dupe and repair), even if
         the description field is disabled. The hash itself only considers enabled fields.
         """
-        marker_fields = self._marker_fields_from_issue(source_issue, enabled_fields=self._enabled_fields)
+        marker_fields = self._marker_fields_from_issue(
+            source_issue, enabled_fields=self._enabled_fields
+        )
         base_desc = getattr(source_issue, "description", None) or ""
         if not self._field_enabled("description"):
             base_desc = ""
@@ -711,7 +713,9 @@ class SyncService:
                 )
 
         # Prepare issue data
-        marker_fields = self._marker_fields_from_issue(source_issue, enabled_fields=self._enabled_fields)
+        marker_fields = self._marker_fields_from_issue(
+            source_issue, enabled_fields=self._enabled_fields
+        )
         base_desc = getattr(source_issue, "description", None) or ""
         if not self._field_enabled("description"):
             base_desc = ""
@@ -729,7 +733,9 @@ class SyncService:
         }
 
         if self._field_enabled("labels"):
-            issue_data["labels"] = source_issue.labels if getattr(source_issue, "labels", None) else []
+            issue_data["labels"] = (
+                source_issue.labels if getattr(source_issue, "labels", None) else []
+            )
 
         issue_type = getattr(source_issue, "issue_type", None)
         if issue_type and self._field_enabled("issue_type"):
@@ -753,7 +759,10 @@ class SyncService:
 
         # Optional extra fields (best-effort; can be disabled via SYNC_FIELDS).
         optional_keys: list[str] = []
-        if self._field_enabled("confidential") and getattr(source_issue, "confidential", None) is not None:
+        if (
+            self._field_enabled("confidential")
+            and getattr(source_issue, "confidential", None) is not None
+        ):
             issue_data["confidential"] = getattr(source_issue, "confidential")
             optional_keys.append("confidential")
         if (
@@ -1251,7 +1260,9 @@ class SyncService:
         # Fetch current target for state comparison and for marker-only description updates.
         target_issue = target_client.get_issue(target_project_id, target_issue_iid)
 
-        marker_fields = self._marker_fields_from_issue(source_issue, enabled_fields=self._enabled_fields)
+        marker_fields = self._marker_fields_from_issue(
+            source_issue, enabled_fields=self._enabled_fields
+        )
 
         update_data: Dict[str, Any] = {}
 
@@ -1284,7 +1295,9 @@ class SyncService:
                 )
 
         if self._field_enabled("labels"):
-            update_data["labels"] = source_issue.labels if getattr(source_issue, "labels", None) else []
+            update_data["labels"] = (
+                source_issue.labels if getattr(source_issue, "labels", None) else []
+            )
 
         if self._field_enabled("assignees"):
             update_data["assignee_ids"] = assignee_ids
@@ -1312,7 +1325,10 @@ class SyncService:
 
         # Optional extra fields (best-effort)
         optional_keys: list[str] = []
-        if self._field_enabled("confidential") and getattr(source_issue, "confidential", None) is not None:
+        if (
+            self._field_enabled("confidential")
+            and getattr(source_issue, "confidential", None) is not None
+        ):
             update_data["confidential"] = getattr(source_issue, "confidential")
             optional_keys.append("confidential")
         if (
@@ -1325,9 +1341,7 @@ class SyncService:
         # Handle state changes
         if self._field_enabled("state"):
             if getattr(source_issue, "state", None) != getattr(target_issue, "state", None):
-                update_data["state_event"] = (
-                    "close" if source_issue.state == "closed" else "reopen"
-                )
+                update_data["state_event"] = "close" if source_issue.state == "closed" else "reopen"
 
         # Update issue
         if update_data:
