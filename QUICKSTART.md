@@ -169,7 +169,7 @@ Your token must have **all three** of these scopes:
 1. Add both instances
 2. Create user mappings for all team members:
    - Map each user from Instance A to Instance B
-   - Also map from Instance B to Instance A (for bidirectional)
+   - You do not need to add the reverse mapping (Instance B → Instance A)
 3. Create project pair with "Bidirectional Sync" enabled
 4. Issues and assignees will sync both ways
 

@@ -239,7 +239,11 @@ class SyncService:
     def _get_user_mapping(
         self, username: str, source_instance_id: int, target_instance_id: int
     ) -> Optional[str]:
-        """Get mapped username for target instance"""
+        """Get mapped username for target instance.
+
+        Mappings are stored directionally as (source_instance, source_username) -> (target_instance, target_username).
+        For bidirectional sync runs we support a reverse lookup so users don't have to enter duplicate mappings.
+        """
         mapping = (
             self.db.query(UserMapping)
             .filter(
@@ -249,7 +253,21 @@ class SyncService:
             )
             .first()
         )
-        return mapping.target_username if mapping else None
+        if mapping:
+            return mapping.target_username
+
+        # Reverse lookup: if someone configured A:user -> B:user2, then when syncing B->A,
+        # allow mapping B:user2 -> A:user without requiring a second DB row.
+        reverse = (
+            self.db.query(UserMapping)
+            .filter(
+                UserMapping.source_instance_id == target_instance_id,
+                UserMapping.target_instance_id == source_instance_id,
+                UserMapping.target_username == username,
+            )
+            .first()
+        )
+        return reverse.source_username if reverse else None
 
     def _map_usernames(
         self, usernames: List[str], source_instance_id: int, target_instance_id: int
