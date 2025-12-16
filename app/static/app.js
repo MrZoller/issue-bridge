@@ -257,8 +257,8 @@ async function createProjectPair(event) {
     event.preventDefault();
     const formData = new FormData(event.target);
 
+    const name = (formData.get('name') || '').trim();
     const data = {
-        name: formData.get('name'),
         source_instance_id: parseInt(formData.get('source_instance_id')),
         source_project_id: formData.get('source_project_id'),
         target_instance_id: parseInt(formData.get('target_instance_id')),
@@ -267,6 +267,8 @@ async function createProjectPair(event) {
         sync_enabled: formData.get('sync_enabled') === 'on',
         sync_interval_minutes: parseInt(formData.get('sync_interval_minutes'))
     };
+    // Let the server auto-generate a name if blank.
+    if (name) data.name = name;
 
     try {
         const response = await fetch('/api/project-pairs/', {

@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.models import ProjectPair
+from app.models import GitLabInstance, ProjectPair
 from app.models.base import get_db
 from app.scheduler import scheduler
 
@@ -15,7 +15,8 @@ router = APIRouter(prefix="/api/project-pairs", tags=["project-pairs"])
 
 
 class ProjectPairCreate(BaseModel):
-    name: str
+    # Optional: if omitted/blank, we auto-generate a readable name
+    name: Optional[str] = None
     source_instance_id: int
     source_project_id: str
     target_instance_id: int
@@ -50,15 +51,64 @@ def list_project_pairs(db: Session = Depends(get_db)):
     return pairs
 
 
+def _generate_project_pair_name(
+    db: Session,
+    *,
+    source_instance_id: int,
+    source_project_id: str,
+    target_instance_id: int,
+    target_project_id: str,
+    exclude_pair_id: Optional[int] = None,
+) -> str:
+    """Generate a readable, unique project pair name.
+
+    Format: "<source instance>:<source project> <-> <target instance>:<target project>"
+    """
+    source_instance = (
+        db.query(GitLabInstance).filter(GitLabInstance.id == source_instance_id).first()
+    )
+    target_instance = (
+        db.query(GitLabInstance).filter(GitLabInstance.id == target_instance_id).first()
+    )
+    source_name = source_instance.name if source_instance else f"instance-{source_instance_id}"
+    target_name = target_instance.name if target_instance else f"instance-{target_instance_id}"
+
+    base = f"{source_name}:{source_project_id} <-> {target_name}:{target_project_id}"
+
+    candidate = base
+    suffix = 2
+    while True:
+        q = db.query(ProjectPair).filter(ProjectPair.name == candidate)
+        if exclude_pair_id is not None:
+            q = q.filter(ProjectPair.id != exclude_pair_id)
+        if q.first() is None:
+            return candidate
+        candidate = f"{base} ({suffix})"
+        suffix += 1
+
+
 @router.post("/", response_model=ProjectPairResponse)
 def create_project_pair(pair: ProjectPairCreate, db: Session = Depends(get_db)):
     """Create a new project pair"""
-    # Check if name already exists
-    existing = db.query(ProjectPair).filter(ProjectPair.name == pair.name).first()
-    if existing:
-        raise HTTPException(status_code=400, detail="Project pair name already exists")
+    requested_name = (pair.name or "").strip()
+    if requested_name:
+        # Check if name already exists
+        existing = db.query(ProjectPair).filter(ProjectPair.name == requested_name).first()
+        if existing:
+            raise HTTPException(status_code=400, detail="Project pair name already exists")
+        final_name = requested_name
+    else:
+        final_name = _generate_project_pair_name(
+            db,
+            source_instance_id=pair.source_instance_id,
+            source_project_id=pair.source_project_id,
+            target_instance_id=pair.target_instance_id,
+            target_project_id=pair.target_project_id,
+        )
 
-    db_pair = ProjectPair(**pair.dict())
+    payload = pair.dict()
+    payload["name"] = final_name
+    db_pair = ProjectPair(**payload)
     db.add(db_pair)
     db.commit()
     db.refresh(db_pair)
@@ -85,8 +135,31 @@ def update_project_pair(pair_id: int, pair: ProjectPairCreate, db: Session = Dep
     if not db_pair:
         raise HTTPException(status_code=404, detail="Project pair not found")
 
+    requested_name = (pair.name or "").strip()
+    if requested_name:
+        existing = (
+            db.query(ProjectPair)
+            .filter(ProjectPair.name == requested_name, ProjectPair.id != pair_id)
+            .first()
+        )
+        if existing:
+            raise HTTPException(status_code=400, detail="Project pair name already exists")
+        final_name = requested_name
+    else:
+        final_name = _generate_project_pair_name(
+            db,
+            source_instance_id=pair.source_instance_id,
+            source_project_id=pair.source_project_id,
+            target_instance_id=pair.target_instance_id,
+            target_project_id=pair.target_project_id,
+            exclude_pair_id=pair_id,
+        )
+
     for key, value in pair.dict().items():
+        if key == "name":
+            continue
         setattr(db_pair, key, value)
+    db_pair.name = final_name
 
     db.commit()
     db.refresh(db_pair)
