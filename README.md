@@ -198,6 +198,13 @@ PORT=8000
 
 # Sync Configuration
 DEFAULT_SYNC_INTERVAL_MINUTES=10
+#
+# Optional: comma-separated allowlist of issue fields to sync (global for all pairs).
+# If omitted/blank, IssueBridge uses its default field set.
+#
+# Example:
+# SYNC_FIELDS=title,description,labels,assignees,comments
+SYNC_FIELDS=
 
 # Logging
 LOG_LEVEL=INFO
@@ -213,9 +220,23 @@ Notes:
 - `DATABASE_URL`: SQLite by default. For Docker, it’s typically set to a path under `/data/` via `docker-compose.yml`.
 - `HOST`/`PORT`: where the web UI/API binds.
 - `DEFAULT_SYNC_INTERVAL_MINUTES`: default interval for newly-created project pairs.
+- `SYNC_FIELDS`: optional comma-separated allowlist of issue fields to sync (applies to all project pairs). If empty, defaults are used.
 - `LOG_LEVEL`: e.g. `DEBUG`, `INFO`, `WARNING`, `ERROR`.
 - `AUTH_ENABLED`: set `true` to protect the UI/API with built-in HTTP Basic auth (recommended if you expose this beyond localhost/private networks).
 - `AUTH_USERNAME` / `AUTH_PASSWORD`: credentials used when `AUTH_ENABLED=true`.
+
+#### Configuring which fields are synced (`SYNC_FIELDS`)
+
+Set `SYNC_FIELDS` to a comma-separated list of fields to sync. Anything not listed will be left alone (except that IssueBridge still ensures its hidden sync markers are present for mapping/loop-prevention).
+
+Supported values:
+
+- `title`, `description`, `state`
+- `labels`, `assignees`, `milestone`, `due_date`
+- `weight`, `time_estimate`
+- `issue_type`, `iteration`, `epic`
+- `comments`
+- (best-effort) `confidential`, `discussion_locked`
 
 ### GitLab Access Tokens
 
@@ -371,6 +392,15 @@ IssueBridge uses **hidden HTML comment markers** in issue descriptions and comme
 - **dedupe synced comments** reliably (even if users edit text)
 - **rebuild mappings** if the database is lost or out of sync
 - **best-effort restore relationships** (iteration/epic/milestone/issue type) during repair
+
+### No cross-instance ID/IID assumptions
+
+IssueBridge **does not assume** that GitLab `id` or `iid` values match across instances:
+
+- Synced issues are tracked as an explicit **(source_iid, target_iid)** pair in the database and can be repaired from markers.
+- Markers record the **origin instance + project + issue IID**, so a mirrored issue can be identified even when its IID differs.
+- Relationships that inherently differ across instances (like **iterations** and **epics**) are mapped by **title** (best-effort) rather than by numeric IDs.
+- Numeric `id` values are only used as **local identifiers on the same instance** when required by a specific API (e.g., linking an issue to an epic).
 
 ### Issue description marker
 

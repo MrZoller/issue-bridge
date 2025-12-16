@@ -1,7 +1,7 @@
 """GitLab instance management endpoints"""
 
 from datetime import datetime
-from typing import List
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -17,16 +17,16 @@ class GitLabInstanceCreate(BaseModel):
     name: str
     url: str
     access_token: str
-    description: str = None
-    catch_all_username: str = None
+    description: Optional[str] = None
+    catch_all_username: Optional[str] = None
 
 
 class GitLabInstanceResponse(BaseModel):
     id: int
     name: str
     url: str
-    description: str = None
-    catch_all_username: str = None
+    description: Optional[str] = None
+    catch_all_username: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
