@@ -304,7 +304,10 @@ Navigate to the "User Mappings" tab to map usernames:
 - **Target Instance**: The target GitLab instance
 - **Target Username**: Username on the target instance
 
-**Note**: Users without mappings will not be assigned to synced issues.
+**Notes**:
+
+- Users without mappings will not be assigned to synced issues.
+- For bidirectional sync, you only need to create the mapping once per instance pair (A → B). The reverse direction (B → A) is resolved automatically.
 
 ### 3. Create Project Pairs
 
