@@ -15,6 +15,11 @@ class Settings(BaseSettings):
 
     # Sync
     default_sync_interval_minutes: int = 10
+    # Comma-separated allowlist of issue fields to sync (global; applies to all project pairs).
+    # If empty/omitted, the service uses its built-in default set.
+    #
+    # Example: "title,description,labels,assignees,comments"
+    sync_fields: str | None = None
 
     # Logging
     log_level: str = "INFO"

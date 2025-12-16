@@ -140,34 +140,6 @@ def _sqlite_gitlab_instances_add_catch_all_username():
         conn.exec_driver_sql("ALTER TABLE gitlab_instances ADD COLUMN catch_all_username VARCHAR")
 
 
-def _sqlite_project_pairs_add_sync_fields():
-    """
-    SQLite-only schema upgrade:
-    Add `project_pairs.sync_fields` (nullable) if missing.
-
-    `sync_fields` is a comma-separated allowlist of fields to sync for a pair.
-    """
-    if engine.dialect.name != "sqlite":
-        return
-
-    with engine.begin() as conn:
-        tables = {
-            row[0]
-            for row in conn.exec_driver_sql(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            ).fetchall()
-        }
-        if "project_pairs" not in tables:
-            return
-
-        info_rows = conn.exec_driver_sql("PRAGMA table_info(project_pairs)").fetchall()
-        cols = {r[1] for r in info_rows}
-        if "sync_fields" in cols:
-            return
-
-        conn.exec_driver_sql("ALTER TABLE project_pairs ADD COLUMN sync_fields TEXT")
-
-
 def init_db():
     """Initialize database"""
     # Ensure all models are imported so SQLAlchemy metadata is populated.
@@ -178,4 +150,3 @@ def init_db():
     _sqlite_conflicts_make_target_issue_iid_nullable()
     _ensure_synced_issues_unique_indexes()
     _sqlite_gitlab_instances_add_catch_all_username()
-    _sqlite_project_pairs_add_sync_fields()

@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import relationship
 
 from app.models.base import Base
@@ -28,9 +28,6 @@ class ProjectPair(Base):
     sync_enabled = Column(Boolean, default=True)
     bidirectional = Column(Boolean, default=True)
     sync_interval_minutes = Column(Integer, default=10)
-    # Optional comma-separated allowlist of issue fields to sync for this pair.
-    # If NULL/empty, the service uses its default behavior.
-    sync_fields = Column(Text, nullable=True)
 
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)

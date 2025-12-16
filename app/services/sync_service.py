@@ -12,6 +12,7 @@ import gitlab
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.models import (
     Conflict,
     GitLabInstance,
@@ -57,24 +58,20 @@ class SyncService:
     def __init__(self, db: Session):
         self.db = db
         self.clients: Dict[int, GitLabClient] = {}
-        # Defaults can be overridden per project pair at runtime.
-        self._enabled_fields: set[str] = set(self.DEFAULT_SYNC_FIELDS)
-
-    def _set_enabled_fields_from_project_pair(self, project_pair: ProjectPair):
-        """Set enabled field allowlist for this sync run (per project pair)."""
-        raw = (getattr(project_pair, "sync_fields", None) or "").strip()
-        if not raw:
-            self._enabled_fields = set(self.DEFAULT_SYNC_FIELDS)
-            return
-
-        fields = {f.strip() for f in raw.split(",") if f and f.strip()}
-        # Filter unknown fields silently (so old DB rows/config don't break sync).
-        fields = {f for f in fields if f in self.ALLOWED_SYNC_FIELDS}
-        # Always keep comments marker/metadata behavior stable (but allow disabling comment syncing itself).
-        self._enabled_fields = fields or set(self.DEFAULT_SYNC_FIELDS)
+        self._enabled_fields: set[str] = self._parse_enabled_fields(settings.sync_fields)
 
     def _field_enabled(self, name: str) -> bool:
         return name in self._enabled_fields
+
+    @classmethod
+    def _parse_enabled_fields(cls, raw: Optional[str]) -> set[str]:
+        """Parse global SYNC_FIELDS allowlist (comma-separated)."""
+        value = (raw or "").strip()
+        if not value:
+            return set(cls.DEFAULT_SYNC_FIELDS)
+        fields = {f.strip() for f in value.split(",") if f and f.strip()}
+        fields = {f for f in fields if f in cls.ALLOWED_SYNC_FIELDS}
+        return fields or set(cls.DEFAULT_SYNC_FIELDS)
 
     @staticmethod
     def _utcnow() -> datetime:
@@ -1392,9 +1389,6 @@ class SyncService:
         if not project_pair.sync_enabled:
             logger.info(f"Sync disabled for project pair {project_pair.name}")
             return {"status": "skipped", "message": "Sync disabled"}
-
-        # Apply per-pair field allowlist (defaults if unset).
-        self._set_enabled_fields_from_project_pair(project_pair)
 
         logger.info(f"Starting sync for project pair: {project_pair.name}")
 

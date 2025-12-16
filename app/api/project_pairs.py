@@ -24,9 +24,6 @@ class ProjectPairCreate(BaseModel):
     bidirectional: bool = True
     sync_enabled: bool = True
     sync_interval_minutes: int = 10
-    # Optional comma-separated allowlist of issue fields to sync for this pair.
-    # If omitted/blank, defaults are used.
-    sync_fields: Optional[str] = None
 
 
 class ProjectPairResponse(BaseModel):
@@ -39,7 +36,6 @@ class ProjectPairResponse(BaseModel):
     sync_enabled: bool
     bidirectional: bool
     sync_interval_minutes: int
-    sync_fields: Optional[str]
     created_at: datetime
     updated_at: datetime
     last_sync_at: Optional[datetime]
