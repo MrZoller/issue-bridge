@@ -111,6 +111,35 @@ def _ensure_synced_issues_unique_indexes():
                     pass
 
 
+def _sqlite_gitlab_instances_add_catch_all_username():
+    """
+    SQLite-only schema upgrade:
+    Add `gitlab_instances.catch_all_username` (nullable) if missing.
+
+    We use ALTER TABLE ADD COLUMN which SQLite supports.
+    """
+    if engine.dialect.name != "sqlite":
+        return
+
+    with engine.begin() as conn:
+        tables = {
+            row[0]
+            for row in conn.exec_driver_sql(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        if "gitlab_instances" not in tables:
+            return
+
+        info_rows = conn.exec_driver_sql("PRAGMA table_info(gitlab_instances)").fetchall()
+        cols = {r[1] for r in info_rows}  # name is column 2 in row tuple
+        if "catch_all_username" in cols:
+            return
+
+        # Keep type generic; SQLite doesn't enforce strict types.
+        conn.exec_driver_sql("ALTER TABLE gitlab_instances ADD COLUMN catch_all_username VARCHAR")
+
+
 def init_db():
     """Initialize database"""
     # Ensure all models are imported so SQLAlchemy metadata is populated.
@@ -120,3 +149,4 @@ def init_db():
     Base.metadata.create_all(bind=engine)
     _sqlite_conflicts_make_target_issue_iid_nullable()
     _ensure_synced_issues_unique_indexes()
+    _sqlite_gitlab_instances_add_catch_all_username()

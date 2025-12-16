@@ -90,6 +90,11 @@
                         </div>
                     </div>
                     <div class="form-group">
+                        <label for="instance-catch-all-username">Catch-all Username (optional)</label>
+                        <input type="text" id="instance-catch-all-username" name="catch_all_username" placeholder="e.g. integration-bot">
+                        <small class="help-text">Used when an assignee has no explicit mapping. Leave empty to keep current behavior.</small>
+                    </div>
+                    <div class="form-group">
                         <label for="instance-token">Access Token *</label>
                         <input type="password" id="instance-token" name="access_token" required>
                     </div>
@@ -109,12 +114,13 @@
                             <th>Name</th>
                             <th>URL</th>
                             <th>Description</th>
+                            <th>Catch-all Username</th>
                             <th>Created</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody id="instances-tbody">
-                        <tr><td colspan="5" class="loading">Loading...</td></tr>
+                        <tr><td colspan="6" class="loading">Loading...</td></tr>
                     </tbody>
                 </table>
             </div>

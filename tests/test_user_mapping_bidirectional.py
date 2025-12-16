@@ -47,6 +47,22 @@ class UserMappingLookupTests(unittest.TestCase):
         out = svc._get_user_mapping("bob", source_instance_id=2, target_instance_id=1)
         self.assertEqual(out, "alice")
 
+    def test_map_usernames_uses_catch_all_when_missing(self):
+        from app.services.sync_service import SyncService
+
+        svc = SyncService(_FakeSession(first_queue=[None, None]))
+        out = svc._map_usernames(
+            ["alice", "bob"], source_instance_id=1, target_instance_id=2, fallback_username="catchall"
+        )
+        self.assertEqual(out, ["catchall", "catchall"])
+
+    def test_map_usernames_keeps_current_behavior_when_no_catch_all(self):
+        from app.services.sync_service import SyncService
+
+        svc = SyncService(_FakeSession(first_queue=[None, None]))
+        out = svc._map_usernames(["alice", "bob"], source_instance_id=1, target_instance_id=2)
+        self.assertEqual(out, [])
+
 
 if __name__ == "__main__":
     unittest.main()

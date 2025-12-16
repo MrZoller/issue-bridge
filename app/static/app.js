@@ -123,6 +123,7 @@ async function loadInstances() {
                 <td>${instance.name}</td>
                 <td>${instance.url}</td>
                 <td>${instance.description || '-'}</td>
+                <td>${instance.catch_all_username || '-'}</td>
                 <td>${new Date(instance.created_at).toLocaleDateString()}</td>
                 <td>
                     <button class="btn btn-danger btn-sm" onclick="deleteInstance(${instance.id})">Delete</button>
@@ -144,7 +145,8 @@ async function createInstance(event) {
         name: formData.get('name'),
         url: formData.get('url'),
         access_token: formData.get('access_token'),
-        description: formData.get('description')
+        description: formData.get('description'),
+        catch_all_username: formData.get('catch_all_username')
     };
 
     try {

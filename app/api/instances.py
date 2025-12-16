@@ -18,6 +18,7 @@ class GitLabInstanceCreate(BaseModel):
     url: str
     access_token: str
     description: str = None
+    catch_all_username: str = None
 
 
 class GitLabInstanceResponse(BaseModel):
@@ -25,6 +26,7 @@ class GitLabInstanceResponse(BaseModel):
     name: str
     url: str
     description: str = None
+    catch_all_username: str = None
     created_at: datetime
     updated_at: datetime
 
