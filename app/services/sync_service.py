@@ -270,9 +270,19 @@ class SyncService:
         return reverse.source_username if reverse else None
 
     def _map_usernames(
-        self, usernames: List[str], source_instance_id: int, target_instance_id: int
+        self,
+        usernames: List[str],
+        source_instance_id: int,
+        target_instance_id: int,
+        *,
+        fallback_username: Optional[str] = None,
     ) -> List[str]:
-        """Map list of usernames to target instance"""
+        """Map list of usernames to target instance.
+
+        If no explicit mapping exists for a username, and `fallback_username` is set,
+        use it as a catch-all. If `fallback_username` is not set, the username is
+        ignored (current behavior).
+        """
         mapped = []
         for username in usernames:
             mapped_username = self._get_user_mapping(
@@ -281,7 +291,10 @@ class SyncService:
             if mapped_username:
                 mapped.append(mapped_username)
             else:
-                logger.warning(f"No mapping found for user '{username}'")
+                if fallback_username:
+                    mapped.append(fallback_username)
+                else:
+                    logger.warning(f"No mapping found for user '{username}'")
         return mapped
 
     def _ensure_labels(self, client: GitLabClient, project_id: str, labels: List[str]):
@@ -572,6 +585,7 @@ class SyncService:
         target_project_id: str,
         target_instance_id: int,
         source_project_id: str,
+        target_catch_all_username: Optional[str] = None,
         stats: Optional[Dict[str, int]] = None,
     ) -> Any:
         """Create a new issue in target from source issue"""
@@ -598,7 +612,10 @@ class SyncService:
                 u for u in (self._extract_username(a) for a in source_issue.assignees) if u
             ]
             mapped_usernames = self._map_usernames(
-                assignee_usernames, source_instance.id, target_instance_id
+                assignee_usernames,
+                source_instance.id,
+                target_instance_id,
+                fallback_username=(target_catch_all_username or None),
             )
             for username in mapped_usernames:
                 user = target_client.get_user_by_username(username)
@@ -1063,6 +1080,7 @@ class SyncService:
         target_project_id: str,
         target_instance_id: int,
         source_project_id: str,
+        target_catch_all_username: Optional[str] = None,
         stats: Optional[Dict[str, int]] = None,
     ):
         """Update existing target issue from source"""
@@ -1090,7 +1108,10 @@ class SyncService:
                 u for u in (self._extract_username(a) for a in source_issue.assignees) if u
             ]
             mapped_usernames = self._map_usernames(
-                assignee_usernames, source_instance.id, target_instance_id
+                assignee_usernames,
+                source_instance.id,
+                target_instance_id,
+                fallback_username=(target_catch_all_username or None),
             )
             for username in mapped_usernames:
                 user = target_client.get_user_by_username(username)
@@ -1463,6 +1484,9 @@ class SyncService:
                                     target_project_id,
                                     target_instance.id,
                                     source_project_id,
+                                    target_catch_all_username=getattr(
+                                        target_instance, "catch_all_username", None
+                                    ),
                                     stats=stats,
                                 )
                                 if direction == SyncDirection.SOURCE_TO_TARGET:
@@ -1527,6 +1551,9 @@ class SyncService:
                                 target_project_id,
                                 target_instance.id,
                                 source_project_id,
+                                target_catch_all_username=getattr(
+                                    target_instance, "catch_all_username", None
+                                ),
                                 stats=stats,
                             )
                             synced_issue.last_synced_at = self._utcnow()
@@ -1617,6 +1644,9 @@ class SyncService:
                             target_project_id,
                             target_instance.id,
                             source_project_id,
+                            target_catch_all_username=getattr(
+                                target_instance, "catch_all_username", None
+                            ),
                             stats=stats,
                         )
 
