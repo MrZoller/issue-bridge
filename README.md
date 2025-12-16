@@ -198,6 +198,13 @@ PORT=8000
 
 # Sync Configuration
 DEFAULT_SYNC_INTERVAL_MINUTES=10
+#
+# Optional: comma-separated allowlist of issue fields to sync (global for all pairs).
+# If omitted/blank, IssueBridge uses its default field set.
+#
+# Example:
+# SYNC_FIELDS=title,description,labels,assignees,comments
+SYNC_FIELDS=
 
 # Logging
 LOG_LEVEL=INFO
@@ -213,9 +220,23 @@ Notes:
 - `DATABASE_URL`: SQLite by default. For Docker, it’s typically set to a path under `/data/` via `docker-compose.yml`.
 - `HOST`/`PORT`: where the web UI/API binds.
 - `DEFAULT_SYNC_INTERVAL_MINUTES`: default interval for newly-created project pairs.
+- `SYNC_FIELDS`: optional comma-separated allowlist of issue fields to sync (applies to all project pairs). If empty, defaults are used.
 - `LOG_LEVEL`: e.g. `DEBUG`, `INFO`, `WARNING`, `ERROR`.
 - `AUTH_ENABLED`: set `true` to protect the UI/API with built-in HTTP Basic auth (recommended if you expose this beyond localhost/private networks).
 - `AUTH_USERNAME` / `AUTH_PASSWORD`: credentials used when `AUTH_ENABLED=true`.
+
+#### Configuring which fields are synced (`SYNC_FIELDS`)
+
+Set `SYNC_FIELDS` to a comma-separated list of fields to sync. Anything not listed will be left alone (except that IssueBridge still ensures its hidden sync markers are present for mapping/loop-prevention).
+
+Supported values:
+
+- `title`, `description`, `state`
+- `labels`, `assignees`, `milestone`, `due_date`
+- `weight`, `time_estimate`
+- `issue_type`, `iteration`, `epic`
+- `comments`
+- (best-effort) `confidential`, `discussion_locked`
 
 ### GitLab Access Tokens
 
