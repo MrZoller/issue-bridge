@@ -372,6 +372,15 @@ IssueBridge uses **hidden HTML comment markers** in issue descriptions and comme
 - **rebuild mappings** if the database is lost or out of sync
 - **best-effort restore relationships** (iteration/epic/milestone/issue type) during repair
 
+### No cross-instance ID/IID assumptions
+
+IssueBridge **does not assume** that GitLab `id` or `iid` values match across instances:
+
+- Synced issues are tracked as an explicit **(source_iid, target_iid)** pair in the database and can be repaired from markers.
+- Markers record the **origin instance + project + issue IID**, so a mirrored issue can be identified even when its IID differs.
+- Relationships that inherently differ across instances (like **iterations** and **epics**) are mapped by **title** (best-effort) rather than by numeric IDs.
+- Numeric `id` values are only used as **local identifiers on the same instance** when required by a specific API (e.g., linking an issue to an epic).
+
 ### Issue description marker
 
 Every synced issue includes:
