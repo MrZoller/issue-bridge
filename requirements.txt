@@ -3,7 +3,7 @@ uvicorn[standard]==0.24.0
 python-gitlab==4.2.0
 sqlalchemy==2.0.23
 alembic==1.12.1
-pydantic==2.5.0
+pydantic==2.12.5
 pydantic-settings==2.1.0
 apscheduler==3.10.4
 python-multipart==0.0.6
